@@ -4,10 +4,8 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
-use lazy_static::lazy_static;
 use pest_derive::Parser;
 use pest::{Parser, iterators::{Pair, Pairs}};
-use pest::prec_climber::{PrecClimber, Operator, Assoc};
 
 use crate::ast::*;
 
@@ -41,47 +39,11 @@ impl std::error::Error for Error {}
 type PR<T> = Result<T, Error>;
 
 
-lazy_static! {
-    static ref PREC_CLIMBER: PrecClimber<Rule> = {
-        use Rule::*;
-        use Assoc::*;
-
-        PrecClimber::new(vec![
-            // lowest
-            Operator::new(op_and, Left) | Operator::new(op_or, Left) |
-            Operator::new(op_xor, Left),
-
-            Operator::new(op_eq, Left) | Operator::new(op_ne, Left) |
-            Operator::new(op_gt, Left) | Operator::new(op_ge, Left) |
-            Operator::new(op_lt, Left) | Operator::new(op_le, Left),
-
-            Operator::new(op_add, Left) | Operator::new(op_sub, Left),
-
-            Operator::new(op_mul, Left) | Operator::new(op_div, Left) |
-            Operator::new(op_mod, Left),
-            // highest
-            Operator::new(op_exp, Right),
-        ])
-    };
-}
-
 fn make_num(inp: &str) -> PR<f64> {
-    let mut buf = String::with_capacity(inp.len());
-    let mut com = false;
-    // get rid of spaces and comments
-    for ch in inp.chars() {
-        match ch {
-            ' ' | '\t' => (),
-            ')' => com = false,
-            '(' => com = true,
-            _ if com => (),
-            _ => buf.push(ch),
-        }
-    }
-    buf.parse().map_err(|_| Error::Other(format!("invalid number: {:?}", inp)))
+    inp.parse().map_err(|_| Error::Other(format!("invalid number: {:?}", inp)))
 }
 
-fn make_int(inp: f64, mul: f64) -> PR<u16> {
+fn num_to_int(inp: f64, mul: f64) -> PR<u16> {
     let v = inp * mul;
     if (v.round() - v).abs() < 0.0001 && v >= 0. && v <= 65535. {
         Ok(v.round() as u16)
@@ -90,47 +52,69 @@ fn make_int(inp: f64, mul: f64) -> PR<u16> {
     }
 }
 
+fn child(pair: Pair<Rule>) -> Pair<Rule> {
+    pair.into_inner().next().expect("a child rule is required")
+}
+
 fn make_expr(expr_pair: Pair<Rule>) -> PR<Expr> {
-    let pairs = expr_pair.into_inner();
-    PREC_CLIMBER.climb(
-        pairs,
-        |pair| match pair.as_rule() {
-            Rule::num => Ok(Expr::Num(make_num(pair.as_str())?)),
-            Rule::expr => make_expr(pair),
+    let mut lhs = None;
+    let mut op = None;
+    for pair in expr_pair.into_inner() {
+        match pair.as_rule() {
+            // singleton inside "expr_atom" or "value"
+            Rule::expr => return make_expr(pair),
+            Rule::num => return Ok(Expr::Num(make_num(pair.as_str())?)),
             Rule::expr_call => {
-                let func = pair.as_str().split("[").next().unwrap();
-                let mut inner = pair.into_inner().into_iter();
+                let mut inner = pair.into_inner();
+                let func = inner.next().unwrap().as_str();
                 let x = make_expr(inner.next().unwrap())?;
-                Ok(Expr::Call(func.into(), vec![x]))
+                return Ok(Expr::Call(func.into(), vec![x]));
             }
             Rule::expr_atan => {
-                let mut inner = pair.into_inner().into_iter();
+                let mut inner = pair.into_inner();
                 let x = make_expr(inner.next().unwrap())?;
                 let y = make_expr(inner.next().unwrap())?;
-                Ok(Expr::Call("ATAN".into(), vec![x, y]))
+                return Ok(Expr::Call("ATAN".into(), vec![x, y]));
             }
-            Rule::par_ref => Ok(Expr::Par(make_par_ref(pair)?)),
-            _ => unreachable!("while climbing, found {:?}", pair.as_rule()),
-        },
-        |lhs, op, rhs| match op.as_rule() {
-            Rule::op_exp => Ok(Expr::Op(Op::Exp, Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_mul => Ok(Expr::Op(Op::Mul, Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_div => Ok(Expr::Op(Op::Div, Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_mod => Ok(Expr::Op(Op::Mod, Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_add => Ok(Expr::Op(Op::Add, Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_sub => Ok(Expr::Op(Op::Sub, Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_eq  => Ok(Expr::Op(Op::Eq,  Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_ne  => Ok(Expr::Op(Op::Ne,  Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_gt  => Ok(Expr::Op(Op::Gt,  Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_ge  => Ok(Expr::Op(Op::Ge,  Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_lt  => Ok(Expr::Op(Op::Lt,  Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_le  => Ok(Expr::Op(Op::Le,  Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_and => Ok(Expr::Op(Op::And, Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_or  => Ok(Expr::Op(Op::Or,  Box::new(lhs?), Box::new(rhs?))),
-            Rule::op_xor => Ok(Expr::Op(Op::Xor, Box::new(lhs?), Box::new(rhs?))),
-            _ => unreachable!(),
-        },
-    )
+            Rule::par_ref => return Ok(Expr::Par(make_par_ref(pair)?)),
+            // rules inside (left-associative) binops
+            Rule::expr_atom |
+            Rule::expr_pow |
+            Rule::expr_mul |
+            Rule::expr_add |
+            Rule::expr_cmp => {
+                if let Some(op) = op.take() {
+                    let lhs_expr = lhs.take().expect("LHS expected before op");
+                    lhs = Some(Expr::Op(op, Box::new(lhs_expr), Box::new(make_expr(pair)?)));
+                } else {
+                    lhs = Some(make_expr(pair)?);
+                }
+            }
+            // operators inside binops
+            Rule::op_pow => op = Some(Op::Exp),
+            Rule::op_mul => op = Some(match pair.as_str() {
+                "*" => Op::Mul, "/" => Op::Div, _ => Op::Mod,
+            }),
+            Rule::op_add => op = Some(match pair.as_str() {
+                "+" => Op::Add, _ => Op::Sub,
+            }),
+            Rule::op_cmp => op = Some(match pair.as_str() {
+                x if x.eq_ignore_ascii_case("EQ") => Op::Eq,
+                x if x.eq_ignore_ascii_case("NE") => Op::Ne,
+                x if x.eq_ignore_ascii_case("GT") => Op::Gt,
+                x if x.eq_ignore_ascii_case("GE") => Op::Ge,
+                x if x.eq_ignore_ascii_case("LT") => Op::Lt,
+                _                                 => Op::Le
+            }),
+            Rule::op_log => op = Some(match pair.as_str() {
+                x if x.eq_ignore_ascii_case("AND") => Op::And,
+                x if x.eq_ignore_ascii_case("OR")  => Op::Or,
+                _                                  => Op::Xor,
+            }),
+            _ => unreachable!()
+        }
+    }
+    Ok(lhs.expect("no children in expr?"))
 }
 
 fn make_instr(pairs: Pairs<Rule>) -> PR<Option<Instr>> {
@@ -144,11 +128,11 @@ fn make_instr(pairs: Pairs<Rule>) -> PR<Option<Instr>> {
         "s" | "S" => Ok(Some(Instr::Spindle(value))),
         "t" | "T" => Ok(Some(Instr::Tool(value))),
         "g" | "G" => match value {
-            Expr::Num(n) => Ok(Some(Instr::Gcode(make_int(n, 10.)?, vec![]))),
+            Expr::Num(n) => Ok(Some(Instr::Gcode(num_to_int(n, 10.)?, vec![]))),
             _ => Err(Error::Other("G words must have a constant numeric value".into())),
         },
         "m" | "M" => match value {
-            Expr::Num(n) => Ok(Some(Instr::Mcode(make_int(n, 1.)?, vec![]))),
+            Expr::Num(n) => Ok(Some(Instr::Mcode(num_to_int(n, 1.)?, vec![]))),
             _ => Err(Error::Other("M words must have a constant numeric value".into())),
         },
         "a" | "A" => Ok(Some(Instr::Arg(Arg::AxisA, value))),
@@ -175,13 +159,10 @@ fn make_instr(pairs: Pairs<Rule>) -> PR<Option<Instr>> {
 }
 
 fn make_par_ref(pair: Pair<Rule>) -> PR<ParId> {
-    let pair = pair.into_inner().into_iter().next().unwrap();
+    let pair = child(pair);
     Ok(match pair.as_rule() {
-        Rule::num => ParId::Numeric(make_int(make_num(pair.as_str())?, 1.)?),
-        Rule::par_name => {
-            let name = pair.as_str();
-            ParId::Named(name[1..name.len()-1].into())
-        },
+        Rule::par_num => ParId::Numeric(pair.as_str().parse().expect("valid integer")),
+        Rule::name => ParId::Named(pair.as_str().into()),
         Rule::par_ref => ParId::Indirect(Box::new(Expr::Par(make_par_ref(pair)?))),
         Rule::expr => ParId::Indirect(Box::new(make_expr(pair)?)),
         _ => unreachable!()

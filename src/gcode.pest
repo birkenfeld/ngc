@@ -16,38 +16,30 @@ value  =  { num | par_ref | expr_brack }
 // number syntax
 
 num    =  { ("+" | "-")? ~ (ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? | "." ~ ASCII_DIGIT+) }
+name   =  { (ASCII_ALPHA | "_")+ }
 
 // parameter syntax
 
 par_assign =  { par_ref ~ "=" ~ value }
-par_ref    =  { "#" ~ (num | expr_brack | par_name | par_ref) }
-par_name   =  { "<" ~ name ~ ">" }
-name       = _{ (ASCII_ALPHA | "_")+ }
+par_ref    =  { "#" ~ (par_num | "<" ~ name ~ ">" | par_ref | expr_brack) }
+par_num    =  { ASCII_DIGIT+ }
 
 // expression syntax
 
 expr_brack = _{ "[" ~ expr ~ "]" }
-expr       =  { expr_term ~ (expr_op ~ expr_term)* }
-expr_term  = _{ expr_atan | expr_call | num | par_ref | expr_brack }
-expr_atan  =  { ^"ATAN" ~ "[" ~ expr ~ "]" ~ "/" ~ "[" ~ expr ~ "]" }
-expr_call  =  { name ~ "[" ~ expr ~ "]" }
-expr_op    = _{ op_exp | op_mul | op_div | op_mod | op_add | op_sub |
-                op_eq | op_ne | op_gt | op_ge | op_lt | op_le |
-                op_and | op_or | op_xor }
+expr       =  { expr_cmp ~ (op_log ~ expr_cmp)* }
+expr_cmp   =  { expr_add ~ (op_cmp ~ expr_add)* }
+expr_add   =  { expr_mul ~ (op_add ~ expr_mul)* }
+expr_mul   =  { expr_pow ~ (op_mul ~ expr_pow)* }
+expr_pow   =  { expr_atom ~ (op_pow ~ expr_atom)* }
+expr_atom  =  { expr_atan | expr_call | num | par_ref | expr_brack }
+expr_atan  =  { ^"ATAN" ~ expr_brack ~ "/" ~ expr_brack }
+expr_call  =  { name ~ expr_brack }
+
 // operators
 
-op_exp  =  { "**" }
-op_mul  =  { "*" }
-op_div  =  { "/" }
-op_mod  =  { ^"MOD" }
-op_add  =  { "+" }
-op_sub  =  { "-" }
-op_eq   =  { ^"EQ" }
-op_ne   =  { ^"NE" }
-op_gt   =  { ^"GT" }
-op_ge   =  { ^"GE" }
-op_lt   =  { ^"LT" }
-op_le   =  { ^"LE" }
-op_and  =  { ^"AND" }
-op_or   =  { ^"OR" }
-op_xor  =  { ^"XOR" }
+op_pow  =  { "**" }
+op_mul  =  { "*" | "/" | ^"MOD" }
+op_add  =  { "+" | "-" }
+op_cmp  =  { ^"EQ" | ^"NE" | ^"GT" | ^"GE" | ^"LT" | ^"LE" }
+op_log  =  { ^"AND" | ^"OR" | ^"XOR" }
