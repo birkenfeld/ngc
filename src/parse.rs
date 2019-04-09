@@ -210,8 +210,33 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> PR<Block> {
     Ok(block)
 }
 
+fn filter(input: &str) -> String {
+    let mut new = String::with_capacity(input.len());
+    let mut in_comment = false;
+    let mut in_line_comment = false;
+    for ch in input.chars() {
+        match ch {
+            ' ' | '\t' => (),
+            '\n' => {
+                in_line_comment = false;
+                in_comment = false;
+                new.push('\n');
+            }
+            _ if in_line_comment => (),
+            ';' => in_line_comment = true,
+            ')' if in_comment => in_comment = false,
+            '(' => in_comment = true,
+            _ if in_comment => (),
+            _ => new.push(ch),
+        }
+    }
+    new.push('\n');
+    new
+}
+
 pub fn parse(filename: &str, input: &str) -> Result<Program, Error> {
-    let lines = GcodeParser::parse(Rule::file, input)?;
+    let input = filter(input);
+    let lines = GcodeParser::parse(Rule::file, &input)?;
     let mut prog = Program { filename: filename.into(), blocks: vec![] };
     for (n, line) in lines.into_iter().enumerate() {
         if line.as_rule() == Rule::line {

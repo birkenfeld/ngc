@@ -4,29 +4,25 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
-WHITESPACE = _{ " " | "\t" }
-COMMENT    = _{ "(" ~ (!")" ~ ANY)* ~ ")" }
-
-file   = _{ (line? ~ (";" ~ (!"\n" ~ ANY)*)? ~ "\n")* ~ EOI }
+file   = _{ (line? ~ NEWLINE)* ~ EOI }
 line   =  { (word | par_assign)+ }
 
 // argument word syntax
 
 word   =  { letter ~ value }
-letter =  { 'a'..'z' | 'A'..'Z' }
+letter =  { ASCII_ALPHA }
 value  =  { num | par_ref | expr_brack }
 
 // number syntax
 
-num    =  { ("+" | "-")* ~ (digits ~ ("." ~ digits?)? | "." ~ digits) }
-digits = _{ '0'..'9' ~ digits? }
+num    =  { ("+" | "-")? ~ (ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? | "." ~ ASCII_DIGIT+) }
 
 // parameter syntax
 
 par_assign =  { par_ref ~ "=" ~ value }
 par_ref    =  { "#" ~ (num | expr_brack | par_name | par_ref) }
 par_name   =  { "<" ~ name ~ ">" }
-name       = _{ ("_" | 'a'..'z' | 'A'..'Z') ~ name? }
+name       = _{ (ASCII_ALPHA | "_")+ }
 
 // expression syntax
 
