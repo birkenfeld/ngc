@@ -1,0 +1,12 @@
+[package]
+name = "ngc"
+description = "Library to parse G-code (LinuxCNC dialect)"
+keywords = ["gcode", "cnc", "machine"]
+version = "0.1.0"
+authors = ["Georg Brandl <georg@python.org>"]
+edition = "2018"
+
+[dependencies]
+pest = "2.1"
+pest_derive = "2.1"
+lazy_static = "1.3"
