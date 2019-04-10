@@ -16,7 +16,7 @@ pub struct Program {
 pub struct Block {
     pub lineno: usize,
     pub blockdel: bool,
-    pub instructions: Vec<Instr>,
+    pub words: Vec<Word>,
     pub assignments: Vec<ParAssign>,
 }
 
@@ -42,15 +42,12 @@ pub enum Expr {
 }
 
 #[derive(Debug)]
-pub enum Instr {
+pub enum Word {
+    Gcode(Expr),
+    Mcode(Expr),
     Feed(Expr),
     Spindle(Expr),
     Tool(Expr),
-
-    // These should be individual enum values as well...
-    Gcode(u16, Vec<(Arg, Expr)>),
-    Mcode(u16, Vec<(Arg, Expr)>),
-    // This should disappear
     Arg(Arg, Expr),
 }
 
@@ -110,11 +107,14 @@ impl Display for Program {
 
 impl Display for Block {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if self.blockdel {
+            write!(f, "/ ")?;
+        }
         for ass in &self.assignments {
             write!(f, "{} ", ass)?;
         }
-        for instr in &self.instructions {
-            write!(f, "{} ", instr)?;
+        for word in &self.words {
+            write!(f, "{} ", word)?;
         }
         Ok(())
     }
@@ -182,20 +182,15 @@ impl Display for Op {
     }
 }
 
-impl Display for Instr {
+impl Display for Word {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Instr::Feed(n) => write!(f, "F{}", n),
-            Instr::Spindle(n) => write!(f, "S{}", n),
-            Instr::Tool(n) => write!(f, "T{}", n),
-            // XXX: use arguments
-            Instr::Gcode(n, _) => {
-                let nf = (*n as f64) / 10.;
-                write!(f, "G{}", nf)
-            },
-            Instr::Mcode(n, _) => write!(f, "M{}", n),
-            // This should disappear
-            Instr::Arg(a, n) => write!(f, "{}{}", a, n)
+            Word::Gcode(n) => write!(f, "G{}", n),
+            Word::Mcode(n) => write!(f, "M{}", n),
+            Word::Feed(n) => write!(f, "F{}", n),
+            Word::Spindle(n) => write!(f, "S{}", n),
+            Word::Tool(n) => write!(f, "T{}", n),
+            Word::Arg(a, n) => write!(f, "{}{}", a, n)
         }
     }
 }
