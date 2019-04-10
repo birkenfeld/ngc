@@ -164,7 +164,8 @@ fn make_instr(pairs: Pairs<Rule>) -> ParseResult<Option<Instr>> {
 }
 
 fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
-    let mut block = Block { assignments: vec![], instructions: vec![], lineno: n };
+    let mut block = Block::default();
+    block.lineno = n;
     for pair in pairs {
         match pair.as_rule() {
             Rule::word => if let Some(instr) = make_instr(pair.into_inner())? {
@@ -177,6 +178,7 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
                     value: make_expr(value)?
                 });
             }
+            Rule::blockdel => block.blockdel = true,
             _ => unreachable!()
         }
     }

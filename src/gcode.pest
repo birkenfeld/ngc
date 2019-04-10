@@ -7,8 +7,9 @@
 WHITESPACE = _{ " " | "\t" }
 COMMENT    = _{ "(" ~ (!")" ~ ANY)* ~ ")" | ";" ~ (!NEWLINE ~ ANY)* }
 
-file   = _{ (line? ~ NEWLINE)* ~ EOI }
-line   =  { (word | par_assign)+ }
+file     = _{ (line? ~ NEWLINE)* ~ EOI }
+line     =  { blockdel? ~ (word | par_assign)+ }
+blockdel =  { "/" }
 
 // argument word syntax
 

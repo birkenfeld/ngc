@@ -6,15 +6,16 @@
 
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Program {
     pub filename: String,
     pub blocks: Vec<Block>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Block {
     pub lineno: usize,
+    pub blockdel: bool,
     pub instructions: Vec<Instr>,
     pub assignments: Vec<ParAssign>,
 }
