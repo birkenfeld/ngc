@@ -4,8 +4,9 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
+use itertools::Itertools;
 use pest_derive::Parser;
-use pest::{Parser, iterators::{Pair, Pairs}};
+use pest::{Parser, Span, error::{Error, ErrorVariant}, iterators::{Pair, Pairs}};
 
 use crate::ast::*;
 
@@ -13,68 +14,48 @@ use crate::ast::*;
 #[grammar = "gcode.pest"]
 pub struct GcodeParser;
 
-#[derive(Debug)]
-pub enum Error {
-    Parse(pest::error::Error<Rule>),
-    Other(String),  // XXX flesh out
+type ParseResult<T> = Result<T, Error<Rule>>;
+
+fn err<T>(span: Span, msg: impl Into<String>) -> ParseResult<T> {
+    Err(Error::new_from_span(ErrorVariant::CustomError { message: msg.into() }, span))
 }
 
-impl From<pest::error::Error<Rule>> for Error {
-    fn from(e: pest::error::Error<Rule>) -> Self {
-        Error::Parse(e)
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Error::Parse(e) => write!(f, "{}", e),
-            Error::Other(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-type PR<T> = Result<T, Error>;
-
-
-fn make_num(inp: &str) -> PR<f64> {
-    inp.parse().map_err(|_| Error::Other(format!("invalid number: {:?}", inp)))
-}
-
-fn num_to_int(inp: f64, mul: f64) -> PR<u16> {
-    let v = inp * mul;
+fn num_to_int(span: Span, inp: f64, figures: i32) -> ParseResult<u16> {
+    let v = inp * 10f64.powi(figures);
     if (v.round() - v).abs() < 0.0001 && v >= 0. && v <= 65535. {
         Ok(v.round() as u16)
     } else {
-        Err(Error::Other(format!("number invalid here: {:?}", inp)))
+        err(span, format!("number can have at most {} decimal places", figures))
     }
 }
 
-fn child(pair: Pair<Rule>) -> Pair<Rule> {
-    pair.into_inner().next().expect("a child rule is required")
+fn make_par_ref(pair: Pair<Rule>) -> ParseResult<ParId> {
+    let (pair,) = pair.into_inner().collect_tuple().expect("one child");
+    Ok(match pair.as_rule() {
+        Rule::par_num => ParId::Numeric(pair.as_str().parse().expect("valid integer")),
+        Rule::name => ParId::Named(pair.as_str().into()),
+        Rule::par_ref => ParId::Indirect(Box::new(Expr::Par(make_par_ref(pair)?))),
+        Rule::expr => ParId::Indirect(Box::new(make_expr(pair)?)),
+        _ => unreachable!()
+    })
 }
 
-fn make_expr(expr_pair: Pair<Rule>) -> PR<Expr> {
+fn make_expr(expr_pair: Pair<Rule>) -> ParseResult<Expr> {
     let mut lhs = None;
     let mut op = None;
     for pair in expr_pair.into_inner() {
         match pair.as_rule() {
             // singleton inside "expr_atom" or "value"
             Rule::expr => return make_expr(pair),
-            Rule::num => return Ok(Expr::Num(make_num(pair.as_str())?)),
+            Rule::num => return Ok(Expr::Num(pair.as_str().parse().expect("valid float"))),
             Rule::expr_call => {
-                let mut inner = pair.into_inner();
-                let func = inner.next().unwrap().as_str();
-                let x = make_expr(inner.next().unwrap())?;
-                return Ok(Expr::Call(func.into(), vec![x]));
+                let (func, arg) = pair.into_inner().collect_tuple().expect("children");
+                return Ok(Expr::Call(func.as_str().into(), vec![make_expr(arg)?]));
             }
             Rule::expr_atan => {
-                let mut inner = pair.into_inner();
-                let x = make_expr(inner.next().unwrap())?;
-                let y = make_expr(inner.next().unwrap())?;
-                return Ok(Expr::Call("ATAN".into(), vec![x, y]));
+                let (argy, argx) = pair.into_inner().collect_tuple().expect("children");
+                return Ok(Expr::Call("ATAN".into(), vec![make_expr(argy)?,
+                                                         make_expr(argx)?]));
             }
             Rule::par_ref => return Ok(Expr::Par(make_par_ref(pair)?)),
             // rules inside (left-associative) binops
@@ -117,23 +98,23 @@ fn make_expr(expr_pair: Pair<Rule>) -> PR<Expr> {
     Ok(lhs.expect("no children in expr?"))
 }
 
-fn make_instr(pairs: Pairs<Rule>) -> PR<Option<Instr>> {
-    let mut pairs = pairs.into_iter();
-    let letter = pairs.next().unwrap().as_str();
-    let value = make_expr(pairs.next().unwrap())?;
-    match letter {
-        "o" | "O" => Err(Error::Other("O word control flow is not supported".into())),
+fn make_instr(pairs: Pairs<Rule>) -> ParseResult<Option<Instr>> {
+    let (letter, value) = pairs.collect_tuple().expect("children");
+    let value_span = value.as_span();
+    let value = make_expr(value)?;
+    match letter.as_str() {
+        "o" | "O" => err(letter.as_span(), "O-word control flow is not supported"),
         "n" | "N" => Ok(None),  // line numbers are accepted but ignoredxs
         "f" | "F" => Ok(Some(Instr::Feed(value))),
         "s" | "S" => Ok(Some(Instr::Spindle(value))),
         "t" | "T" => Ok(Some(Instr::Tool(value))),
         "g" | "G" => match value {
-            Expr::Num(n) => Ok(Some(Instr::Gcode(num_to_int(n, 10.)?, vec![]))),
-            _ => Err(Error::Other("G words must have a constant numeric value".into())),
+            Expr::Num(n) => Ok(Some(Instr::Gcode(num_to_int(value_span, n, 1)?, vec![]))),
+            _ => err(value_span, "G words must have a constant numeric value"),
         },
         "m" | "M" => match value {
-            Expr::Num(n) => Ok(Some(Instr::Mcode(num_to_int(n, 1.)?, vec![]))),
-            _ => Err(Error::Other("M words must have a constant numeric value".into())),
+            Expr::Num(n) => Ok(Some(Instr::Mcode(num_to_int(value_span, n, 0)?, vec![]))),
+            _ => err(value_span, "M words must have a constant numeric value"),
         },
         "a" | "A" => Ok(Some(Instr::Arg(Arg::AxisA, value))),
         "b" | "B" => Ok(Some(Instr::Arg(Arg::AxisB, value))),
@@ -158,33 +139,20 @@ fn make_instr(pairs: Pairs<Rule>) -> PR<Option<Instr>> {
     }
 }
 
-fn make_par_ref(pair: Pair<Rule>) -> PR<ParId> {
-    let pair = child(pair);
-    Ok(match pair.as_rule() {
-        Rule::par_num => ParId::Numeric(pair.as_str().parse().expect("valid integer")),
-        Rule::name => ParId::Named(pair.as_str().into()),
-        Rule::par_ref => ParId::Indirect(Box::new(Expr::Par(make_par_ref(pair)?))),
-        Rule::expr => ParId::Indirect(Box::new(make_expr(pair)?)),
-        _ => unreachable!()
-    })
-}
-
-fn make_par_assign(pairs: Pairs<Rule>) -> PR<ParAssign> {
-    let mut pairs = pairs.into_iter();
-    Ok(ParAssign {
-        id: make_par_ref(pairs.next().unwrap())?,
-        value: make_expr(pairs.next().unwrap())?,
-    })
-}
-
-fn make_block(n: usize, pairs: Pairs<Rule>) -> PR<Block> {
+fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
     let mut block = Block { assignments: vec![], instructions: vec![], lineno: n };
     for pair in pairs {
         match pair.as_rule() {
             Rule::word => if let Some(instr) = make_instr(pair.into_inner())? {
                 block.instructions.push(instr);
-            },
-            Rule::par_assign => block.assignments.push(make_par_assign(pair.into_inner())?),
+            }
+            Rule::par_assign => {
+                let (id, value) = pair.into_inner().collect_tuple().expect("parse");
+                block.assignments.push(ParAssign {
+                    id: make_par_ref(id)?,
+                    value: make_expr(value)?
+                });
+            }
             _ => unreachable!()
         }
     }
@@ -193,21 +161,22 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> PR<Block> {
 
 fn filter(input: &str) -> String {
     let mut new = String::with_capacity(input.len());
-    let mut in_comment = false;
-    let mut in_line_comment = false;
+    let mut par_comment = false;
+    let mut line_comment = false;
     for ch in input.chars() {
         match ch {
             ' ' | '\t' => (),
             '\n' => {
-                in_line_comment = false;
-                in_comment = false;
+                line_comment = false;
+                // NOTE: this doesn't complain about unclosed ()
+                par_comment = false;
                 new.push('\n');
             }
-            _ if in_line_comment => (),
-            ';' => in_line_comment = true,
-            ')' if in_comment => in_comment = false,
-            '(' => in_comment = true,
-            _ if in_comment => (),
+            _ if line_comment => (),
+            ')' if par_comment => par_comment = false,
+            '(' => par_comment = true,
+            _ if par_comment => (),
+            ';' => line_comment = true,
             _ => new.push(ch),
         }
     }
@@ -215,13 +184,12 @@ fn filter(input: &str) -> String {
     new
 }
 
-pub fn parse(filename: &str, input: &str) -> Result<Program, Error> {
+pub fn parse(filename: &str, input: &str) -> ParseResult<Program> {
     let input = filter(input);
-    let lines = GcodeParser::parse(Rule::file, &input)?;
+    let lines = GcodeParser::parse(Rule::file, &input).map_err(|e| e.with_path(filename))?;
     let mut prog = Program { filename: filename.into(), blocks: vec![] };
-    for (n, line) in lines.into_iter().enumerate() {
+    for (n, line) in lines.enumerate() {
         if line.as_rule() == Rule::line {
-            // TODO count empty lines too...
             prog.blocks.push(make_block(n, line.into_inner())?);
         }
     }

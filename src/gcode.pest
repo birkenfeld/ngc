@@ -4,17 +4,15 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
-file   = _{ (line? ~ NEWLINE)* ~ EOI }
-line   =  { (word | par_assign)+ }
+file   = _{ (line | empty)* ~ EOI }
+line   =  { (word | par_assign)+ ~ NEWLINE }
+empty  =  { NEWLINE }
 
 // argument word syntax
 
 word   =  { letter ~ value }
 letter =  { ASCII_ALPHA }
 value  =  { num | par_ref | expr_brack }
-
-// number syntax
-
 num    =  { ("+" | "-")? ~ (ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? | "." ~ ASCII_DIGIT+) }
 name   =  { (ASCII_ALPHA | "_")+ }
 
