@@ -4,9 +4,11 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
-file   = _{ (line | empty)* ~ EOI }
-line   =  { (word | par_assign)+ ~ NEWLINE }
-empty  =  { NEWLINE }
+WHITESPACE = _{ " " | "\t" }
+COMMENT    = _{ "(" ~ (!")" ~ ANY)* ~ ")" | ";" ~ (!NEWLINE ~ ANY)* }
+
+file   = _{ (line? ~ NEWLINE)* ~ EOI }
+line   =  { (word | par_assign)+ }
 
 // argument word syntax
 

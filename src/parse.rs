@@ -4,6 +4,7 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
+use std::str::FromStr;
 use itertools::Itertools;
 use pest_derive::Parser;
 use pest::{Parser, Span, error::{Error, ErrorVariant}, iterators::{Pair, Pairs}};
@@ -20,6 +21,25 @@ fn err<T>(span: Span, msg: impl Into<String>) -> ParseResult<T> {
     Err(Error::new_from_span(ErrorVariant::CustomError { message: msg.into() }, span))
 }
 
+fn parse_filtered<T: FromStr>(pair: Pair<Rule>) -> T
+    where T::Err: std::fmt::Debug
+{
+    let input = pair.as_str();
+    let mut new = String::with_capacity(input.len());
+    let mut in_comment = false;
+    for ch in input.chars() {
+        match ch {
+            ' ' | '\t' => (),
+            ')' if in_comment => in_comment = false,
+            '(' => in_comment = true,
+            _ if in_comment => (),
+            ';' => break,
+            _ => new.push(ch),
+        }
+    }
+    new.parse().expect("valid parse")
+}
+
 fn num_to_int(span: Span, inp: f64, figures: i32) -> ParseResult<u16> {
     let v = inp * 10f64.powi(figures);
     if (v.round() - v).abs() < 0.0001 && v >= 0. && v <= 65535. {
@@ -32,8 +52,8 @@ fn num_to_int(span: Span, inp: f64, figures: i32) -> ParseResult<u16> {
 fn make_par_ref(pair: Pair<Rule>) -> ParseResult<ParId> {
     let (pair,) = pair.into_inner().collect_tuple().expect("one child");
     Ok(match pair.as_rule() {
-        Rule::par_num => ParId::Numeric(pair.as_str().parse().expect("valid integer")),
-        Rule::name => ParId::Named(pair.as_str().into()),
+        Rule::par_num => ParId::Numeric(parse_filtered(pair)),
+        Rule::name => ParId::Named(parse_filtered(pair)),
         Rule::par_ref => ParId::Indirect(Box::new(Expr::Par(make_par_ref(pair)?))),
         Rule::expr => ParId::Indirect(Box::new(make_expr(pair)?)),
         _ => unreachable!()
@@ -47,10 +67,10 @@ fn make_expr(expr_pair: Pair<Rule>) -> ParseResult<Expr> {
         match pair.as_rule() {
             // singleton inside "expr_atom" or "value"
             Rule::expr => return make_expr(pair),
-            Rule::num => return Ok(Expr::Num(pair.as_str().parse().expect("valid float"))),
+            Rule::num => return Ok(Expr::Num(parse_filtered(pair))),
             Rule::expr_call => {
                 let (func, arg) = pair.into_inner().collect_tuple().expect("children");
-                return Ok(Expr::Call(func.as_str().into(), vec![make_expr(arg)?]));
+                return Ok(Expr::Call(parse_filtered(func), vec![make_expr(arg)?]));
             }
             Rule::expr_atan => {
                 let (argy, argx) = pair.into_inner().collect_tuple().expect("children");
@@ -72,6 +92,8 @@ fn make_expr(expr_pair: Pair<Rule>) -> ParseResult<Expr> {
                 }
             }
             // operators inside binops
+            // XXX: can there be comments *INSIDE* of op names and between **?
+            // Also check ATAN.
             Rule::op_pow => op = Some(Op::Exp),
             Rule::op_mul => op = Some(match pair.as_str() {
                 "*" => Op::Mul, "/" => Op::Div, _ => Op::Mod,
@@ -110,6 +132,8 @@ fn make_instr(pairs: Pairs<Rule>) -> ParseResult<Option<Instr>> {
         "t" | "T" => Ok(Some(Instr::Tool(value))),
         "g" | "G" => match value {
             Expr::Num(n) => Ok(Some(Instr::Gcode(num_to_int(value_span, n, 1)?, vec![]))),
+            // XXX this is actually accepted by LinuxCNC, but would require evaluating
+            // the program before being able to reorder and check words
             _ => err(value_span, "G words must have a constant numeric value"),
         },
         "m" | "M" => match value {
@@ -147,7 +171,7 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
                 block.instructions.push(instr);
             }
             Rule::par_assign => {
-                let (id, value) = pair.into_inner().collect_tuple().expect("parse");
+                let (id, value) = pair.into_inner().collect_tuple().expect("children");
                 block.assignments.push(ParAssign {
                     id: make_par_ref(id)?,
                     value: make_expr(value)?
@@ -159,34 +183,8 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
     Ok(block)
 }
 
-fn filter(input: &str) -> String {
-    let mut new = String::with_capacity(input.len());
-    let mut par_comment = false;
-    let mut line_comment = false;
-    for ch in input.chars() {
-        match ch {
-            ' ' | '\t' => (),
-            '\n' => {
-                line_comment = false;
-                // NOTE: this doesn't complain about unclosed ()
-                par_comment = false;
-                new.push('\n');
-            }
-            _ if line_comment => (),
-            ')' if par_comment => par_comment = false,
-            '(' => par_comment = true,
-            _ if par_comment => (),
-            ';' => line_comment = true,
-            _ => new.push(ch),
-        }
-    }
-    new.push('\n');
-    new
-}
-
 pub fn parse(filename: &str, input: &str) -> ParseResult<Program> {
-    let input = filter(input);
-    let lines = GcodeParser::parse(Rule::file, &input).map_err(|e| e.with_path(filename))?;
+    let lines = GcodeParser::parse(Rule::file, input).map_err(|e| e.with_path(filename))?;
     let mut prog = Program { filename: filename.into(), blocks: vec![] };
     for (n, line) in lines.enumerate() {
         if line.as_rule() == Rule::line {
