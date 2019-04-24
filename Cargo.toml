@@ -10,3 +10,10 @@ edition = "2018"
 pest = "2.1"
 pest_derive = "2.1"
 itertools = "0.8"
+fixedbitset = "0.1"
+strum = "0.15"
+strum_macros = "0.15"
+
+[features]
+default = []
+interpreter = []

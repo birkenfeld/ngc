@@ -6,3 +6,6 @@
 
 pub mod ast;
 pub mod parse;
+
+#[cfg(feature = "interpreter")]
+pub mod interp;

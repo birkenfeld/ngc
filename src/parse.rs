@@ -147,6 +147,7 @@ fn make_word(pairs: Pairs<Rule>) -> ParseResult<Option<Word>> {
 
 fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
     let mut block = Block::default();
+    // TODO: how to get the real lineno?
     block.lineno = n;
     for pair in pairs {
         match pair.as_rule() {
