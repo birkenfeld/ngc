@@ -166,12 +166,12 @@ pub enum Instr {
     ToolSelect(u16),
 }
 
-pub struct InterpError {
+pub struct EvalError {
     pub lineno: usize,
     pub errtype: ErrType,
 }
 
-impl fmt::Display for InterpError {
+impl fmt::Display for EvalError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error in line {}: ", self.lineno)?;
         match &self.errtype {
@@ -241,14 +241,17 @@ pub enum ErrType {
     UnsupportedMCode(u16),
 }
 
-/// The Interpreter translates G-code into a series of machine instructions,
+/// The Evaluator translates G-code into a series of machine instructions,
 /// resolving variable interpolation, modal word state and ordering of words on
 /// a line.
-pub struct Interpreter {
+///
+/// It does *not* calculate absolute coordinates for everything, or try to
+/// resolve compund G-codes (like drilling cycles) to individual operations.
+pub struct Evaluator {
     program: Program,
     /// Available axes
     axes: Vec<Axis>,
-    /// TODO: numeric vars as numbers?
+    /// TODO: numeric vars as numbers instead of #n?
     vars: HashMap<String, f64>,
 
     // private stuff
@@ -288,9 +291,9 @@ fn num_to_int(inp: f64, figures: i32, max: f64, err: impl Fn(f64) -> ErrType) ->
     }
 }
 
-impl Interpreter {
+impl Evaluator {
     pub fn new(program: Program, axes: impl Into<Vec<Axis>>, vars: Option<HashMap<String, f64>>) -> Self {
-        Interpreter {
+        Evaluator {
             program,
             axes: axes.into(),
             vars: vars.unwrap_or_default(),
@@ -299,23 +302,23 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret<F>(&mut self, interpret_blockdel: bool, mut exec: F) -> Result<(), InterpError>
+    pub fn eval<F>(&mut self, eval_blockdel: bool, mut exec: F) -> Result<(), EvalError>
     where F: FnMut(&mut Self, Instruction) -> Result<(), ErrType>
     {
         let blocks = std::mem::replace(&mut self.program.blocks, vec![]);
         for block in &blocks {
-            if block.blockdel && !interpret_blockdel {
+            if block.blockdel && !eval_blockdel {
                 continue;
             }
-            if self.interpret_block(block, &mut exec)
-                   .map_err(|e| InterpError { lineno: block.lineno, errtype: e })? {
+            if self.eval_block(block, &mut exec)
+                   .map_err(|e| EvalError { lineno: block.lineno, errtype: e })? {
                 break;
             }
         }
         Ok(())
     }
 
-    fn interpret_block<F>(&mut self, block: &Block, mut exec: F) -> Result<bool, ErrType>
+    fn eval_block<F>(&mut self, block: &Block, mut exec: F) -> Result<bool, ErrType>
     where F: FnMut(&mut Self, Instruction) -> Result<(), ErrType>
     {
         macro_rules! exec {
@@ -337,18 +340,18 @@ impl Interpreter {
         let mut params = Params(HashMap::new());
         for word in &block.words {
             match word {
-                Word::Feed(ex) => feed = Some(self.eval(ex)?),
-                Word::Spindle(ex) => spindle = Some(self.eval(ex)?),
+                Word::Feed(ex) => feed = Some(self.eval_expr(ex)?),
+                Word::Spindle(ex) => spindle = Some(self.eval_expr(ex)?),
                 Word::Tool(ex) => {
-                    let n = num_to_int(self.eval(ex)?, 0, 100., ErrType::InvalidTool)?;
+                    let n = num_to_int(self.eval_expr(ex)?, 0, 100., ErrType::InvalidTool)?;
                     tool = Some(n);
                 }
                 Word::Gcode(ex) => {
-                    let n = num_to_int(self.eval(ex)?, 1, 1000., ErrType::InvalidGCode)?;
+                    let n = num_to_int(self.eval_expr(ex)?, 1, 1000., ErrType::InvalidGCode)?;
                     gcodes.insert(n as usize);
                 }
                 Word::Mcode(ex) => {
-                    let n = num_to_int(self.eval(ex)?, 0, 100., ErrType::InvalidMCode)?;
+                    let n = num_to_int(self.eval_expr(ex)?, 0, 100., ErrType::InvalidMCode)?;
                     mcodes.insert(n as usize);
                 }
                 Word::Arg(a, ex) => {
@@ -356,11 +359,11 @@ impl Interpreter {
                         if !self.axes.contains(&ax) {
                             return Err(ErrType::InvalidAxis(ax));
                         }
-                        axes.insert(ax, self.eval(ex)?);
+                        axes.insert(ax, self.eval_expr(ex)?);
                     } else if let Some(arc) = Arc::from_arg(a) {
-                        arcs.insert(arc, self.eval(ex)?);
+                        arcs.insert(arc, self.eval_expr(ex)?);
                     } else {
-                        params.0.insert(Param::from_arg(a).unwrap(), self.eval(ex)?);
+                        params.0.insert(Param::from_arg(a).unwrap(), self.eval_expr(ex)?);
                     }
                 }
             }
@@ -374,7 +377,7 @@ impl Interpreter {
         let mut new_values = vec![];
         for assign in &block.assignments {
             new_values.push((self.get_par_key(&assign.id)?.into_owned(),
-                             self.eval(&assign.value)?));
+                             self.eval_expr(&assign.value)?));
         }
         for (name, value) in new_values {
             self.vars.insert(name, value);
@@ -638,14 +641,14 @@ impl Interpreter {
             ParId::Named(s) => s.into(),
             ParId::Numeric(n) => format!("#{}", n).into(),
             ParId::Indirect(expr) => {
-                let parnum = self.eval(&expr)?;
+                let parnum = self.eval_expr(&expr)?;
                 let parnum = num_to_int(parnum, 0, 1000000., ErrType::InvalidParamNumber)?;
                 format!("#{}", parnum).into()
             }
         })
     }
 
-    fn eval(&self, expr: &Expr) -> Result<f64, ErrType> {
+    fn eval_expr(&self, expr: &Expr) -> Result<f64, ErrType> {
         Ok(match expr {
             Expr::Num(value) => *value,
             Expr::Par(id) => {
@@ -656,8 +659,8 @@ impl Interpreter {
                 }
             }
             Expr::Op(op, left, right) => {
-                let left = self.eval(left)?;
-                let right = self.eval(right)?;
+                let left = self.eval_expr(left)?;
+                let right = self.eval_expr(right)?;
                 match op {
                     Op::Exp => left.powf(right),
                     Op::Mul => left * right,
@@ -691,11 +694,11 @@ impl Interpreter {
                         return Err(ErrType::ExistsNeedsParameterName)
                     }
                 } else if name == "ATAN" {
-                    let arg_y = self.eval(&exprs[0])?;
-                    let arg_x = self.eval(&exprs[1])?;
+                    let arg_y = self.eval_expr(&exprs[0])?;
+                    let arg_x = self.eval_expr(&exprs[1])?;
                     arg_y.atan2(arg_x)
                 } else {
-                    let arg = self.eval(&exprs[0])?;
+                    let arg = self.eval_expr(&exprs[0])?;
                     match &**name {
                         "ABS" => arg.abs(),
                         "ACOS" => arg.acos(),

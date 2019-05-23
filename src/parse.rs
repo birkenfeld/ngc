@@ -6,14 +6,20 @@
 
 use std::str::FromStr;
 use itertools::Itertools;
-use pest_derive::Parser;
 use pest::{Parser, Span, error::{Error, ErrorVariant}, iterators::{Pair, Pairs}};
 
 use crate::ast::*;
 
-#[derive(Parser)]
-#[grammar = "gcode.pest"]
-pub struct GcodeParser;
+// Since pest makes Rule "pub", we do this in order to not show it to crate users.
+mod parser {
+    use pest_derive::Parser;
+
+    #[derive(Parser)]
+    #[grammar = "gcode.pest"]
+    pub struct GcodeParser;
+}
+
+use self::parser::{GcodeParser, Rule};
 
 type ParseResult<T> = Result<T, Error<Rule>>;
 
@@ -168,6 +174,11 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
     Ok(block)
 }
 
+/// Parse a program, coming from *filename*, consisting of the source *text*.
+///
+/// On parse error, a standard parse error from [pest] is returned.
+///
+/// [pest]: https://docs.rs/pest
 pub fn parse(filename: &str, input: &str) -> ParseResult<Program> {
     let lines = GcodeParser::parse(Rule::file, input).map_err(|e| e.with_path(filename))?;
     let mut prog = Program { filename: filename.into(), blocks: vec![] };

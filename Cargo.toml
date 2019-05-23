@@ -1,10 +1,20 @@
 [package]
 name = "ngc"
 description = "Library to parse G-code (LinuxCNC dialect)"
-keywords = ["gcode", "cnc", "machine"]
+license = "MIT/Apache-2.0"
+keywords = ["gcode", "cnc", "machine", "linuxcnc"]
 version = "0.1.0"
 authors = ["Georg Brandl <georg@python.org>"]
+repository = "https://github.com/birkenfeld/ngc"
+documentation = "https://docs.rs/ngc"
 edition = "2018"
+
+[[bin]]
+name = "ngc-parse"
+
+[[bin]]
+name = "ngc-eval"
+required-features = ["eval"]
 
 [dependencies]
 pest = "2.1"
@@ -16,4 +26,4 @@ strum_macros = "0.15"
 
 [features]
 default = []
-interpreter = []
+eval = []
