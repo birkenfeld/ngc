@@ -4,28 +4,54 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
+//! Data types to represent a parsed G-code program.
+//!
+//! The syntax and semantics are described on the [G-code reference] page from
+//! LinuxCNC.
+//!
+//! [G-code reference]: http://linuxcnc.org/docs/html/gcode/overview.html
+
 use std::fmt::{self, Display, Formatter};
 
+/// A whole program, consisting of blocks.  Each block corresponds to a line in
+/// the source code.
 #[derive(Debug, Default)]
 pub struct Program {
+    /// Original filename of the program, as given to `parse()`.
     pub filename: String,
+    /// Blocks of the program.
     pub blocks: Vec<Block>,
 }
 
+/// A block (source line), which contains a number of words and parameter
+/// assignments.
 #[derive(Debug, Default)]
 pub struct Block {
+    /// Line number in the original file.
     pub lineno: usize,
+    /// True if the line was "block deleted"; i.e. starts with a slash.
+    ///
+    /// Execution of these lines can be switched with a global flag.
     pub blockdel: bool,
+    /// Words (e.g. `G0` or `X5.2`) found in the line.  The ordering is
+    /// irrelevant to G-code.
     pub words: Vec<Word>,
+    /// Assignments (e.g. `#1=4.2`) found in the line.  The ordering, and
+    /// ordering with respect to words, are irrelevant to G-code.
     pub assignments: Vec<ParAssign>,
 }
 
+/// A parameter assignment.
 #[derive(Debug)]
 pub struct ParAssign {
     pub id: ParId,
     pub value: Expr,
 }
 
+/// A reference to a parameter.
+///
+/// This can be a numeric parameter, a named parameter, or an indirect
+/// reference, where the parameter number is determined from an expression.
 #[derive(Debug)]
 pub enum ParId {
     Named(String),
@@ -33,14 +59,27 @@ pub enum ParId {
     Indirect(Box<Expr>),
 }
 
+/// A G-code expression.
 #[derive(Debug)]
 pub enum Expr {
+    /// A simple number.  G-code only knows floating-point numbers; in any place
+    /// that requires integers, a check for an integral value (or something very
+    /// close to it) is performed at execution time.
     Num(f64),
+    /// A parameter reference.
     Par(ParId),
+    /// A function call, with arguments.  There is a small list of built-in
+    /// functions, most of which take one argument.  `ATAN` takes two arguments.
     Call(String, Vec<Expr>),
+    // TODO: unary ops (+, -) exist although they are not documented.
+    /// An operator, with lefthand and righthand expression.
     Op(Op, Box<Expr>, Box<Expr>),
 }
 
+/// A G-code "word", i.e. indication letter and value.
+///
+/// The value can be a complex expression introduced in brackets, even for `G`
+/// and `M` words.
 #[derive(Debug)]
 pub enum Word {
     Gcode(Expr),
@@ -51,6 +90,10 @@ pub enum Word {
     Arg(Arg, Expr),
 }
 
+/// The binary operators known to G-code.
+///
+/// For Boolean inputs, all nonzero numbers are true.  Boolean results are
+/// represented as 0.0 and 1.0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Exp,
@@ -70,6 +113,7 @@ pub enum Op {
     Xor,
 }
 
+/// The possible argument words (i.e. all words except N, G, M, F, S, T).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arg {
     // axis words

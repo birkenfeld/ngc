@@ -8,8 +8,8 @@
 //! [LinuxCNC] dialect of G-Code.
 //!
 //! Currently, it can parse G-Code into an AST, using the Pest parser library.
-//! An evaluator is work in progress and can be enabled with the *eval*
-//! feature flag.
+//! An evaluator is work in progress and the current state can be enabled with
+//! the *eval* feature flag.
 //!
 //! [LinuxCNC]: http://linuxcnc.org/docs/html/gcode/overview.html
 //!

@@ -4,6 +4,8 @@
 // your option. This file may not be copied, modified, or distributed except
 // according to those terms.
 
+//! Parser for G-code.
+
 use std::str::FromStr;
 use itertools::Itertools;
 use pest::{Parser, Span, error::{Error, ErrorVariant}, iterators::{Pair, Pairs}};

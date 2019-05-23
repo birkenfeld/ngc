@@ -14,4 +14,21 @@ Currently, only the parser is functional.
 
 ## Examples
 
-TBD.
+The following code (the same as the "ngc-parse" demo binary) takes a file as
+an argument, parses it and outputs the display form, which is the same
+G-code, but in a consistent format and cleaned of comments.
+
+```rust
+use std::{env, fs};
+use ngc::parse::parse;
+
+fn main() {
+    let filename = env::args().nth(1).unwrap();
+    let input = fs::read_to_string(&filename).unwrap();
+
+    match parse(&filename, &input) {
+        Err(e) => eprintln!("Parse error: {}", e),
+        Ok(prog) => println!("{}", prog),
+    }
+}
+```
