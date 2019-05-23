@@ -23,7 +23,7 @@ mod parser {
 
 use self::parser::{GcodeParser, Rule};
 
-type ParseResult<T> = Result<T, Error<Rule>>;
+pub type ParseResult<T> = Result<T, Error<Rule>>;
 
 fn err<T>(span: Span, msg: impl Into<String>) -> ParseResult<T> {
     Err(Error::new_from_span(ErrorVariant::CustomError { message: msg.into() }, span))

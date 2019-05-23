@@ -26,7 +26,7 @@
 //! an argument, parses it and outputs the display form, which is the same
 //! G-code, but in a consistent format and cleaned of comments.
 //!
-//! ```
+//! ```rust,no_run
 //! use std::{env, fs};
 //! use ngc::parse::parse;
 //!

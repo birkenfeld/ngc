@@ -140,6 +140,23 @@ pub enum Arg {
     ParamR,
 }
 
+fn wrap_op(f: &mut Formatter, ex: &Expr) -> fmt::Result {
+    if let Expr::Op(..) = ex {
+        write!(f, "[{}]", ex)
+    } else {
+        Display::fmt(&ex, f)
+    }
+}
+
+fn wrap_op_and_fn(f: &mut Formatter, ex: &Expr) -> fmt::Result {
+    if let Expr::Op(..) | Expr::Call(..) = ex {
+        write!(f, "[{}]", ex)
+    } else {
+        Display::fmt(&ex, f)
+    }
+}
+
+
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         for block in &self.blocks {
@@ -166,7 +183,8 @@ impl Display for Block {
 
 impl Display for ParAssign {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "#{}={}", self.id, self.value)
+        write!(f, "#{}=", self.id)?;
+        wrap_op(f, &self.value)
     }
 }
 
@@ -175,7 +193,7 @@ impl Display for ParId {
         match self {
             ParId::Numeric(n) => write!(f, "{}", n),
             ParId::Named(n) => write!(f, "<{}>", n),
-            ParId::Indirect(ex) => write!(f, "[{}]", ex),
+            ParId::Indirect(ex) => wrap_op_and_fn(f, ex),
         }
     }
 }
@@ -191,14 +209,9 @@ impl Display for Expr {
                 write!(f, "{}[{}]", func, args[0])
             },
             Expr::Op(op, lhs, rhs) => {
-                match **lhs {
-                    Expr::Op(..) => write!(f, "[{}] {} ", lhs, op)?,
-                    _ => write!(f, "{} {} ", lhs, op)?,
-                }
-                match **rhs {
-                    Expr::Op(..) => write!(f, "[{}]", rhs),
-                    _ => write!(f, "{}", rhs),
-                }
+                wrap_op(f, lhs)?;
+                write!(f, " {} ", op)?;
+                wrap_op(f, rhs)
             }
         }
     }
@@ -229,12 +242,12 @@ impl Display for Op {
 impl Display for Word {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Word::Gcode(n) => write!(f, "G{}", n),
-            Word::Mcode(n) => write!(f, "M{}", n),
-            Word::Feed(n) => write!(f, "F{}", n),
-            Word::Spindle(n) => write!(f, "S{}", n),
-            Word::Tool(n) => write!(f, "T{}", n),
-            Word::Arg(a, n) => write!(f, "{}{}", a, n)
+            Word::Gcode(n)   => { f.write_str("G")?; wrap_op_and_fn(f, n) },
+            Word::Mcode(n)   => { f.write_str("M")?; wrap_op_and_fn(f, n) },
+            Word::Feed(n)    => { f.write_str("F")?; wrap_op_and_fn(f, n) },
+            Word::Spindle(n) => { f.write_str("S")?; wrap_op_and_fn(f, n) },
+            Word::Tool(n)    => { f.write_str("T")?; wrap_op_and_fn(f, n) },
+            Word::Arg(a, n)  => { write!(f, "{}", a)?; wrap_op_and_fn(f, n) },
         }
     }
 }
