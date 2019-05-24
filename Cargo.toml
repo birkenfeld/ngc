@@ -8,6 +8,7 @@ authors = ["Georg Brandl <georg@python.org>"]
 repository = "https://github.com/birkenfeld/ngc"
 documentation = "https://docs.rs/ngc"
 edition = "2018"
+autobins = false
 
 [[bin]]
 name = "ngc-parse"
