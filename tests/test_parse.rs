@@ -31,6 +31,7 @@ G[1 LE 2]
 #[1 ]=3
 #-#2=[+ 5]
 #SIN [0]=7 ; LCNC doesn't like this.
+# 10 = EXISTS[#<blub>]
 
 "#;
 
@@ -47,6 +48,7 @@ G[1 LE 2]
 #1=3
 #-#2=5
 #[SIN[0]]=7
+#10=EXISTS[#<blub>]
 "#;
 
     let prog = parse::parse("testfile", src).unwrap();
@@ -72,6 +74,7 @@ fn test_invalid() {
         "G[1;]",        // line comments within expression
         "G[TEST[x]]",   // invalid function
         "#1.2=5",       // fractional parameter number
+        "#1=EXISTS[5]", // invalid EXISTS argument
     ] {
         assert!(parse::parse("testfile", snippet).is_err());
     }

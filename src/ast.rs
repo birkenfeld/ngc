@@ -68,9 +68,8 @@ pub enum Expr {
     Num(f64),
     /// A parameter reference.
     Par(ParId),
-    /// A function call, with argument.  `ATAN` takes two arguments, and carries
-    /// the first one in the enum variant.
-    Call(Function, Box<Expr>),
+    /// A function call, with argument(s).
+    Call(Call),
     /// An operator, with lefthand and righthand expression.
     BinOp(Op, Box<Expr>, Box<Expr>),
     /// An unary operator.
@@ -121,25 +120,23 @@ pub enum UnOp {
     Minus,
 }
 
-/// The functions known to G-code.
-///
-/// ATAN, having two arguments, carries the first one here.
+/// A function call, with all functions known to G-code.
 #[derive(Debug)]
-pub enum Function {
-    Atan(Box<Expr>),
-    Exists,
-    Abs,
-    Acos,
-    Asin,
-    Cos,
-    Exp,
-    Fix,
-    Fup,
-    Round,
-    Ln,
-    Sin,
-    Sqrt,
-    Tan,
+pub enum Call {
+    Exists(ParId),
+    Atan(Box<Expr>, Box<Expr>),
+    Abs(Box<Expr>),
+    Acos(Box<Expr>),
+    Asin(Box<Expr>),
+    Cos(Box<Expr>),
+    Exp(Box<Expr>),
+    Fix(Box<Expr>),
+    Fup(Box<Expr>),
+    Round(Box<Expr>),
+    Ln(Box<Expr>),
+    Sin(Box<Expr>),
+    Sqrt(Box<Expr>),
+    Tan(Box<Expr>),
 }
 
 /// The possible argument words (i.e. all words except N, G, M, F, S, T).
@@ -220,7 +217,7 @@ impl Display for ParAssign {
 impl Display for ParId {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            ParId::Numeric(n) => write!(f, "{}", n),
+            ParId::Numeric(n) => Display::fmt(n, f),
             ParId::Named(n) => write!(f, "<{}>", n),
             ParId::Indirect(ex) => wrap_op(f, ex),
         }
@@ -230,16 +227,16 @@ impl Display for ParId {
 impl Display for Expr {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Expr::Num(n) => write!(f, "{}", n),
+            Expr::Num(n) => Display::fmt(n, f),
             Expr::Par(id) => write!(f, "#{}", id),
-            Expr::Call(func, arg) => write!(f, "{}[{}]", func, arg),
+            Expr::Call(func) => Display::fmt(func, f),
             Expr::BinOp(op, lhs, rhs) => {
                 wrap_op(f, lhs)?;
                 write!(f, " {} ", op)?;
                 wrap_op(f, rhs)
             }
             Expr::UnOp(op, rhs) => {
-                write!(f, "{}", op)?;
+                Display::fmt(op, f)?;
                 wrap_op(f, rhs)
             }
         }
@@ -248,7 +245,7 @@ impl Display for Expr {
 
 impl Display for Op {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", match self {
+        f.write_str(match self {
             Op::Exp => "**",
             Op::Mul => "*",
             Op::Div => "/",
@@ -270,7 +267,7 @@ impl Display for Op {
 
 impl Display for UnOp {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", match self {
+        f.write_str(match self {
             UnOp::Plus => "+",
             UnOp::Minus => "-",
         })
@@ -285,14 +282,14 @@ impl Display for Word {
             Word::Feed(n)    => { f.write_str("F")?; wrap_op(f, n) },
             Word::Spindle(n) => { f.write_str("S")?; wrap_op(f, n) },
             Word::Tool(n)    => { f.write_str("T")?; wrap_op(f, n) },
-            Word::Arg(a, n)  => { write!(f, "{}", a)?; wrap_op(f, n) },
+            Word::Arg(a, n)  => { Display::fmt(a, f)?; wrap_op(f, n) },
         }
     }
 }
 
 impl Display for Arg {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", match self {
+        f.write_str(match self {
             Arg::AxisA => "A",
             Arg::AxisB => "B",
             Arg::AxisC => "C",
@@ -316,23 +313,23 @@ impl Display for Arg {
     }
 }
 
-impl Display for Function {
+impl Display for Call {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Function::Atan(ex) => write!(f, "ATAN[{}]/", ex),
-            Function::Exists   => f.write_str("EXISTS"),
-            Function::Abs      => f.write_str("ABS"),
-            Function::Acos     => f.write_str("ACOS"),
-            Function::Asin     => f.write_str("ASIN"),
-            Function::Cos      => f.write_str("COS"),
-            Function::Exp      => f.write_str("EXP"),
-            Function::Fix      => f.write_str("FIX"),
-            Function::Fup      => f.write_str("FUP"),
-            Function::Round    => f.write_str("ROUND"),
-            Function::Ln       => f.write_str("LN"),
-            Function::Sin      => f.write_str("SIN"),
-            Function::Sqrt     => f.write_str("SQRT"),
-            Function::Tan      => f.write_str("TAN"),
+            Call::Atan(arg1, arg2) => write!(f, "ATAN[{}]/[{}]", arg1, arg2),
+            Call::Exists(par)      => write!(f, "EXISTS[#{}]", par),
+            Call::Abs(arg)         => write!(f, "ABS[{}]", arg),
+            Call::Acos(arg)        => write!(f, "ACOS[{}]", arg),
+            Call::Asin(arg)        => write!(f, "ASIN[{}]", arg),
+            Call::Cos(arg)         => write!(f, "COS[{}]", arg),
+            Call::Exp(arg)         => write!(f, "EXP[{}]", arg),
+            Call::Fix(arg)         => write!(f, "FIX[{}]", arg),
+            Call::Fup(arg)         => write!(f, "FUP[{}]", arg),
+            Call::Round(arg)       => write!(f, "ROUND[{}]", arg),
+            Call::Ln(arg)          => write!(f, "LN[{}]", arg),
+            Call::Sin(arg)         => write!(f, "SIN[{}]", arg),
+            Call::Sqrt(arg)        => write!(f, "SQRT[{}]", arg),
+            Call::Tan(arg)         => write!(f, "TAN[{}]", arg),
         }
     }
 }

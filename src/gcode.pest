@@ -15,7 +15,7 @@ blockdel =  { "/" }
 
 word   =  { letter ~ value ~ comment* }
 letter =  { ASCII_ALPHA }
-value  =  { op_un* ~ (num | par_ref | expr_brack | expr_atan | expr_call) }
+value  =  { op_un* ~ (num | par_ref | expr_brack | expr_atan | expr_exist | expr_call) }
 num    =  { (ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? | "." ~ ASCII_DIGIT+) }
 
 // parameter syntax
@@ -34,11 +34,12 @@ expr_add   =  { expr_mul ~ (op_add ~ expr_mul)* }
 expr_mul   =  { expr_unop ~ (op_mul ~ expr_unop)* }
 expr_unop  =  { op_un ~ expr_unop | expr_pow }
 expr_pow   =  { expr_atom ~ (op_pow ~ expr_atom)* }
-expr_atom  =  { expr_atan | expr_call | num | par_ref | expr_brack }
+expr_atom  =  { expr_atan | expr_exist | expr_call | num | par_ref | expr_brack }
 expr_atan  =  { ^"ATAN" ~ expr_brack ~ "/" ~ expr_brack }
+expr_exist =  { ^"EXISTS" ~ "[" ~ par_ref ~ "]" }
 expr_call  =  { expr_fn ~ expr_brack }
-expr_fn    =  { ^"ABS" | ^"ACOS" | ^"ASIN" | ^"COS" | ^"EXP" | ^"EXISTS" |
-                ^"FIX" | ^"FUP" | ^"ROUND" | ^"LN" | ^"SIN" | ^"SQRT" | ^"TAN" }
+expr_fn    =  { ^"ABS" | ^"ACOS" | ^"ASIN" | ^"COS" | ^"EXP" | ^"FIX" |
+                ^"FUP" | ^"ROUND" | ^"LN" | ^"SIN" | ^"SQRT" | ^"TAN" }
 
 // operators
 
