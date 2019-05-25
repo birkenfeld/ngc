@@ -152,10 +152,10 @@ pub enum Arg {
     AxisX,
     AxisY,
     AxisZ,
-    // arc parameters
-    ArcI,
-    ArcJ,
-    ArcK,
+    // arc offset parameters
+    OffsetI,
+    OffsetJ,
+    OffsetK,
     // variable meaning params
     ParamD,
     ParamE,
@@ -299,9 +299,9 @@ impl Display for Arg {
             Arg::AxisX => "X",
             Arg::AxisY => "Y",
             Arg::AxisZ => "Z",
-            Arg::ArcI  => "I",
-            Arg::ArcJ  => "J",
-            Arg::ArcK  => "K",
+            Arg::OffsetI => "I",
+            Arg::OffsetJ => "J",
+            Arg::OffsetK => "K",
             Arg::ParamD => "D",
             Arg::ParamE => "E",
             Arg::ParamH => "H",

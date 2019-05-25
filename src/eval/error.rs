@@ -25,16 +25,22 @@ impl fmt::Display for EvalError {
                        c1, c2, s),
             ErrType::InvalidAxis(ax) =>
                 write!(f, "Used nonexisting axis {}", ax),
-            ErrType::InvalidArcCoordinate(arc) =>
-                write!(f, "Arc coordinate {} is not allowed for this plane", arc),
+            ErrType::InvalidOffsetCoordinate(arc) =>
+                write!(f, "Offset coordinate {} is not allowed for this plane", arc),
             ErrType::UnknownParameter(s) =>
                 write!(f, "The parameter {} does not exist", s),
             ErrType::InvalidParamNumber(n) =>
                 write!(f, "Parameter number {} is out of range or not an integer", n),
             ErrType::InvalidAxisValue(ax, v) =>
                 write!(f, "The value {} is out of range for axis {}", v, ax),
-            ErrType::InvalidArcValue(ax, v) =>
-                write!(f, "The value {} is out of range for arc coord {}", v, ax),
+            ErrType::InvalidOffsetValue(off, v) =>
+                write!(f, "The value {} is out of range for offset {}", v, off),
+            ErrType::MixedCenterRadiusArc =>
+                write!(f, "Mixed IJK words and radius for arc"),
+            ErrType::ArcCenterRequired =>
+                write!(f, "Missing either IJK words or radius for arc"),
+            ErrType::AxesRequired(c) =>
+                write!(f, "Missing axes words for G{}", *c as f64 / 10.),
             ErrType::InvalidPlane(p) =>
                 write!(f, "Arcs not supported in the  {} plane", p),
             ErrType::InvalidWordValue(w, v) =>
@@ -71,12 +77,15 @@ pub enum ErrType {
     MissingGCodeWord(u16, GenWord),
     MissingMCodeWord(u16, GenWord),
     InvalidAxis(Axis),
-    InvalidArcCoordinate(Arc),
+    InvalidOffsetCoordinate(Offset),
     InvalidPlane(Plane),
     UnknownParameter(Param),
     InvalidParamNumber(f64),
     InvalidAxisValue(Axis, f64),
-    InvalidArcValue(Axis, f64),
+    InvalidOffsetValue(Offset, f64),
+    MixedCenterRadiusArc,
+    ArcCenterRequired,
+    AxesRequired(u16),
     InvalidWordValue(GenWord, f64),
     DivByZero,
     InvalidTool(f64),

@@ -16,7 +16,7 @@ use crate::util::num_to_int;
 pub use self::enums::*;
 pub use self::error::*;
 
-const MAX_TOOL: u16 = 100; // TODO?
+const MAX_TOOL: u16 = 100;
 const MAX_PARAM: u16 = 10000;
 
 /// A machine instruction collected from G-code.
@@ -28,24 +28,23 @@ pub struct Instruction {
 /// Represents all possible machine instructions.
 ///
 /// Each family of G-codes roughly corresponds to one variant of this enum,
-/// e.g. G2 and G3 both result in `Helix`.
+/// e.g. G2 and G3 both result in `Helix` or `HelixRadius`.
 ///
 /// Some G-codes are handled completely internally, such as switching
 /// units between inches and mm, or lathe mode.
 #[derive(Debug)]
 pub enum Instr {
     // G codes
-    RapidMove(Coords<Axis>),    // G0
-    Move(Coords<Axis>),         // G1
-    Helix(bool, Coords<Axis>,
-          Coords<Arc>, u16),    // G2-3
+    RapidMove(Coords),          // G0
+    Move(Coords),               // G1
+    Helix(bool, Coords, HelixCenter, u16),  // G2-3
     Dwell(f64),                 // G4
     // todo: Splines (G5)
     // todo: Tool table (G10)
     PlaneSelect(Plane), // G17-G19
     // ? Goto/Set predef // G28, G30
     // todo: spindle sync // G33
-    Probe(Coords<Axis>, u32), // G38
+    Probe(Coords, u32),         // G38
     CutterComp(CutterComp),     // G40-42
     LengthComp(LengthComp),     // G43, G49
     // ? MachineCoords G53
@@ -82,21 +81,36 @@ pub struct Evaluator {
     axes: Vec<Axis>,
     // current parameter values
     vars: HashMap<Param, f64>,
-    // private stuff
-    state: State,
+    // private state tracking
+    motion_mode: u16,
+    state: State, // state manipulated by M70-73
+    saved_state: Option<State>,
 }
 
-#[derive(Default)]
+/*
+    TODO: To save for M70:
+    ----------------
+    feed mode (G93/G94,G95)
+    current coordinate system (G54-G59.3)
+    retract mode (G98,G99)
+    spindle mode (G96-css or G97-RPM)
+    speed override (M51) and feed override (M50) settings
+    adaptive feed setting (M52)
+    feed hold setting (M53)
+*/
+
+#[derive(Default, Clone)]
 struct State {
-    motion_mode: u16,
+    feed_rate: f64,
+    spindle_speed: f64,
     dist_rel: bool,
-    arc_rel: bool,
+    offset_rel: bool,
     plane: Plane,
     cutter_comp: CutterComp,
     length_comp: LengthComp,
+    path_mode: PathMode,
     spindle: Spindle,
     coolant: Coolant,
-    // TODO: actually use these.
     lathe_diam: bool,
     inches: bool,
 }
@@ -107,7 +121,9 @@ impl Evaluator {
             program,
             axes: axes.into(),
             vars: vars.unwrap_or_default(),
+            motion_mode: 1,
             state: Default::default(),
+            saved_state: None,
         }
     }
 
@@ -158,7 +174,7 @@ impl Evaluator {
         let mut mcodes = Codes(BitSet::with_capacity(100), ErrType::ConflictingMCodes);
         let mut gens = GenWords(HashMap::new());
         let mut axes = HashMap::new();
-        let mut arcs = HashMap::new();
+        let mut offsets = HashMap::new();
         for word in &block.words {
             match word {
                 Word::Feed(ex) => feed = Some(self.eval_expr(ex)?),
@@ -181,8 +197,8 @@ impl Evaluator {
                             return Err(ErrType::InvalidAxis(ax));
                         }
                         axes.insert(ax, self.eval_expr(ex)?);
-                    } else if let Some(arc) = Arc::from_arg(a) {
-                        arcs.insert(arc, self.eval_expr(ex)?);
+                    } else if let Some(off) = Offset::from_arg(a) {
+                        offsets.insert(off, self.eval_expr(ex)?);
                     } else {
                         gens.insert(GenWord::from_arg(a).unwrap(), self.eval_expr(ex)?);
                     }
@@ -190,7 +206,7 @@ impl Evaluator {
             }
         }
 
-        let has_axis_words = !(axes.is_empty() && arcs.is_empty());
+        let has_axis_words = !(axes.is_empty() && offsets.is_empty());
 
         // Process assignments.  Since parameter assignment only takes place
         // after the whole line has evaluated, including in other assignments,
@@ -225,8 +241,14 @@ impl Evaluator {
         }
 
         // #2. Execute F, S and T codes.
-        if let Some(feed) = feed { exec!(FeedRate(feed)); }
-        if let Some(speed) = spindle { exec!(SpindleSpeed(speed)); }
+        if let Some(feed) = feed {
+            self.state.feed_rate = feed;
+            exec!(FeedRate(feed));
+        }
+        if let Some(speed) = spindle {
+            self.state.spindle_speed = speed;
+            exec!(SpindleSpeed(speed));
+        }
         if let Some(tool) = tool { exec!(ToolSelect(tool)); }
 
         // #3. Execute toolchange (M6 and M61).
@@ -306,6 +328,14 @@ impl Evaluator {
             _ => ()
         }
 
+        // Now fix up axis values to the length and lathe mode.
+        if self.state.inches {
+            axes.iter_mut().filter(|(&ax, _)| ax.is_linear()).for_each(|(_, v)| *v *= 25.4);
+        }
+        if self.state.lathe_diam {
+            axes.iter_mut().filter(|(&ax, _)| ax == Axis::X).for_each(|(_, v)| *v /= 2.);
+        }
+
         // #11. Set cutter radius compensation (G40-G42).  Only "off" is supported.
         if let Some(x) = gcodes.modal_group("cutter radius compensation", &[400, 410, 411, 420, 421])? {
             if x == 400 {
@@ -331,20 +361,28 @@ impl Evaluator {
 
         // #12. Set length compensation (G43, G49).
         if let Some(x) = gcodes.modal_group("cutter length compensation", &[430, 431, 432, 490])? {
-            self.state.length_comp = match x {
-                430 => LengthComp::FromTool(gens.get_int(GenWord::H, MAX_TOOL)?),
-                432 => LengthComp::Additional(gens.get_int(GenWord::H, MAX_TOOL)?
-                                              .ok_or_else(|| ErrType::MissingGCodeWord(432, GenWord::H))?),
+            match x {
+                430 => self.state.length_comp = LengthComp::FromTool(
+                    gens.get_int(GenWord::H, MAX_TOOL)?, vec![]),
+                432 => {
+                    let tool = gens.get_int(GenWord::H, MAX_TOOL)?
+                                   .ok_or_else(|| ErrType::MissingGCodeWord(432, GenWord::H))?;
+                    match &mut self.state.length_comp {
+                        LengthComp::Off => self.state.length_comp = LengthComp::FromTool(Some(tool), vec![]),
+                        LengthComp::FromTool(_, vec) => vec.push(tool),
+                        LengthComp::Dynamic(_, vec) => vec.push(tool),
+                    }
+                }
                 431 => {
                     if let Some(x) = motion_mode {
                         return Err(ErrType::ConflictingGCodes("motion", 431, x));
                     }
                     let dyn_axes = std::mem::replace(&mut axes, HashMap::new());
-                    LengthComp::Dynamic(coords(dyn_axes, true))
+                    self.state.length_comp = LengthComp::Dynamic(Coords::new(dyn_axes, true), vec![]);
                 }
-                490 => LengthComp::Off,
+                490 => self.state.length_comp = LengthComp::Off,
                 _ => unreachable!()
-            };
+            }
             exec!(LengthComp(self.state.length_comp.clone()));
         }
 
@@ -355,12 +393,14 @@ impl Evaluator {
         }
 
         // #14. Set path control mode.
-        match gcodes.modal_group("path control", &[610, 611, 640])? {
-            Some(610) => exec!(PathControl(PathMode::Exact)),
-            Some(611) => exec!(PathControl(PathMode::ExactStop)),
-            Some(640) => exec!(PathControl(PathMode::Blending(gens.get(GenWord::P),
-                                                              gens.get(GenWord::Q)))),
-            _ => ()
+        if let Some(x) = gcodes.modal_group("path control", &[610, 611, 640])? {
+            self.state.path_mode = match x {
+                610 => PathMode::Exact,
+                611 => PathMode::ExactStop,
+                640 => PathMode::Blending(gens.get(GenWord::P), gens.get(GenWord::Q)),
+                _ => unreachable!()
+            };
+            exec!(PathControl(self.state.path_mode));
         }
 
         // #15. Set distance mode.
@@ -369,9 +409,9 @@ impl Evaluator {
             Some(910) => self.state.dist_rel = true,
             _ => ()
         }
-        match gcodes.modal_group("arc distance mode", &[901, 911])? {
-            Some(901) => self.state.arc_rel = false,
-            Some(911) => self.state.arc_rel = true,
+        match gcodes.modal_group("arc offset distance mode", &[901, 911])? {
+            Some(901) => self.state.offset_rel = false,
+            Some(911) => self.state.offset_rel = true,
             _ => ()
         }
 
@@ -392,35 +432,51 @@ impl Evaluator {
             return Err(ErrType::UnsupportedGCode(530));
         }
 
-        // Motion is also performed if there are any axis (or arc) words.
+        // Motion is also performed if there are any axis (or offset) words.
         if motion_mode.is_none() && has_axis_words {
-            motion_mode = Some(self.state.motion_mode);
+            motion_mode = Some(self.motion_mode);
         }
 
         if let Some(x) = motion_mode {
             match x {
-                0   => exec!(RapidMove(coords(axes, self.state.dist_rel))),
-                10  => exec!(Move(coords(axes, self.state.dist_rel))),
+                0   => {
+                    exec!(RapidMove(Coords::new(axes, self.state.dist_rel)));
+                }
+                10  => {
+                    exec!(Move(Coords::new(axes, self.state.dist_rel)));
+                }
                 20 | 30 => {
                     match self.state.plane {
                         Plane::UV | Plane::UW | Plane::VW =>
                             return Err(ErrType::InvalidPlane(self.state.plane)),
-                        Plane::XY if arcs.contains_key(&Arc::K) =>
-                            return Err(ErrType::InvalidArcCoordinate(Arc::K)),
-                        Plane::XZ if arcs.contains_key(&Arc::J) =>
-                            return Err(ErrType::InvalidArcCoordinate(Arc::J)),
-                        Plane::YZ if arcs.contains_key(&Arc::I) =>
-                            return Err(ErrType::InvalidArcCoordinate(Arc::I)),
+                        Plane::XY if offsets.contains_key(&Offset::K) =>
+                            return Err(ErrType::InvalidOffsetCoordinate(Offset::K)),
+                        Plane::XZ if offsets.contains_key(&Offset::J) =>
+                            return Err(ErrType::InvalidOffsetCoordinate(Offset::J)),
+                        Plane::YZ if offsets.contains_key(&Offset::I) =>
+                            return Err(ErrType::InvalidOffsetCoordinate(Offset::I)),
                         _ => ()
                     }
 
-                    exec!(Helix(x == 20, coords(axes, self.state.dist_rel),
-                                coords(arcs, self.state.arc_rel),
-                                gens.get_int_def(GenWord::P, 1, 1000)?));
+                    let center = if let Some(value) = gens.get(GenWord::R) {
+                        if !offsets.is_empty() {
+                            return Err(ErrType::MixedCenterRadiusArc);
+                        }
+                        HelixCenter::Radius(value)
+                    } else {
+                        if offsets.is_empty() {
+                            return Err(ErrType::ArcCenterRequired);
+                        }
+                        HelixCenter::Center(
+                            Coords::from_ijk(offsets, self.state.offset_rel))
+                    };
+
+                    exec!(Helix(x == 20, Coords::new(axes, self.state.dist_rel),
+                                center, gens.get_int_def(GenWord::P, 1, 1000)?));
                 }
                 _ => return Err(ErrType::UnsupportedGCode(x))
             }
-            self.state.motion_mode = x;
+            self.motion_mode = x;
         }
 
         // #19. Stop.
@@ -428,8 +484,25 @@ impl Evaluator {
             Some(0) => exec!(Pause(false, false)),
             Some(1) => exec!(Pause(true, false)),
             Some(60) => exec!(Pause(false, true)),
-            Some(2) => { exec!(End(false)); end_of_program = true; }
-            Some(30) => { exec!(End(true)); end_of_program = true; }
+            Some(x) => {
+                // TODO: commented ones below
+                // Origin offsets are set to the default (like G54).
+                self.state.plane = Plane::XY;
+                exec!(PlaneSelect(Plane::XY));
+                self.state.dist_rel = false;
+                // Feed rate mode is set to units per minute (like G94).
+                // Feed and speed overrides are set to ON (like M48).
+                self.state.cutter_comp = CutterComp::Off;
+                exec!(CutterComp(CutterComp::Off));
+                self.state.spindle = Spindle::Off;
+                exec!(Spindle(Spindle::Off));
+                self.state.coolant = Coolant::default();
+                exec!(Coolant(self.state.coolant));
+                self.motion_mode = 1;
+
+                exec!(End(x == 30));
+                end_of_program = true;
+            }
             _ => ()
         }
 
@@ -530,11 +603,6 @@ impl Evaluator {
 
 
 // ----- non-public helper APIs
-
-fn coords<T>(map: HashMap<T, f64>, rel: bool) -> Coords<T> {
-    Coords { rel, map }
-}
-
 
 /// Helper for flagging and retrieving G and M codes on a line.
 struct Codes(BitSet, fn(&'static str, u16, u16) -> ErrType);

@@ -5,7 +5,6 @@
 // according to those terms.
 
 use std::fmt;
-use std::hash::Hash;
 use std::collections::HashMap;
 use strum_macros::Display;
 
@@ -52,20 +51,27 @@ impl Axis {
             _ => return None
         })
     }
+
+    pub fn is_linear(&self) -> bool {
+        match self {
+            Axis::A | Axis::B | Axis::C => false,
+            _ => true
+        }
+    }
 }
 
-/// An arc center coordinate.
+/// An arc center offset or coordinate.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
-pub enum Arc {
+pub enum Offset {
     I, J, K,
 }
 
-impl Arc {
+impl Offset {
     pub(super) fn from_arg(arg: &Arg) -> Option<Self> {
         Some(match arg {
-            Arg::ArcI => Arc::I,
-            Arg::ArcJ => Arc::J,
-            Arg::ArcK => Arc::K,
+            Arg::OffsetI => Offset::I,
+            Arg::OffsetJ => Offset::J,
+            Arg::OffsetK => Offset::K,
             _ => return None
         })
     }
@@ -108,26 +114,30 @@ impl Default for Plane {
 ///
 /// All length measures are in millimeters.
 /// All angle measures are in degrees.
-#[derive(Clone)]
-pub struct Coords<T> {
+#[derive(Clone, PartialEq)]
+pub struct Coords {
     pub rel: bool,
-    pub map: HashMap<T, f64>,
+    pub map: HashMap<Axis, f64>,
 }
 
-impl Coords<Arc> {
-    pub fn map_to_xyz(self) -> Coords<Axis> {
-        Coords {
-            rel: self.rel,
-            map: self.map.into_iter().map(|(k, v)| (match k {
-                Arc::I => Axis::X,
-                Arc::J => Axis::Y,
-                Arc::K => Axis::Z,
+impl Coords {
+    pub fn new(map: HashMap<Axis, f64>, rel: bool) -> Self {
+        Self { map, rel }
+    }
+
+    pub(crate) fn from_ijk(map: HashMap<Offset, f64>, rel: bool) -> Self {
+        Self {
+            rel: rel,
+            map: map.into_iter().map(|(k, v)| (match k {
+                Offset::I => Axis::X,
+                Offset::J => Axis::Y,
+                Offset::K => Axis::Z,
             }, v)).collect()
         }
     }
 }
 
-impl<T: Hash+Eq+fmt::Display> fmt::Debug for Coords<T> {
+impl fmt::Debug for Coords {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut i = 0;
         for (k, v) in self.map.iter() {
@@ -175,12 +185,13 @@ impl Default for CutterComp {
 }
 
 /// A length compensation state.
-#[derive(Clone, Debug)]
+///
+/// The vector member contains additional tool offsets added with G43.2.
+#[derive(Clone, PartialEq, Debug)]
 pub enum LengthComp {
     Off,
-    FromTool(Option<u16>),
-    Additional(u16),
-    Dynamic(Coords<Axis>),
+    FromTool(Option<u16>, Vec<u16>),
+    Dynamic(Coords, Vec<u16>),
 }
 
 impl Default for LengthComp {
@@ -188,7 +199,7 @@ impl Default for LengthComp {
 }
 
 /// A path control mode.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum PathMode {
     Exact,
     ExactStop,
@@ -197,4 +208,11 @@ pub enum PathMode {
 
 impl Default for PathMode {
     fn default() -> Self { PathMode::Exact }
+}
+
+/// Center specification for a helix.
+#[derive(Clone, Debug)]
+pub enum HelixCenter {
+    Center(Coords),
+    Radius(f64),
 }
