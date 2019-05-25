@@ -71,9 +71,10 @@ pub enum Expr {
     /// A function call, with arguments.  There is a small list of built-in
     /// functions, most of which take one argument.  `ATAN` takes two arguments.
     Call(String, Vec<Expr>),
-    // TODO: unary ops (+, -) exist although they are not documented.
     /// An operator, with lefthand and righthand expression.
-    Op(Op, Box<Expr>, Box<Expr>),
+    BinOp(Op, Box<Expr>, Box<Expr>),
+    /// An unary operator.
+    UnOp(UnOp, Box<Expr>),
 }
 
 /// A G-code "word", i.e. indication letter and value.
@@ -113,6 +114,13 @@ pub enum Op {
     Xor,
 }
 
+/// The unary operators known to G-code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    Plus,
+    Minus,
+}
+
 /// The possible argument words (i.e. all words except N, G, M, F, S, T).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arg {
@@ -141,15 +149,7 @@ pub enum Arg {
 }
 
 fn wrap_op(f: &mut Formatter, ex: &Expr) -> fmt::Result {
-    if let Expr::Op(..) = ex {
-        write!(f, "[{}]", ex)
-    } else {
-        Display::fmt(&ex, f)
-    }
-}
-
-fn wrap_op_and_fn(f: &mut Formatter, ex: &Expr) -> fmt::Result {
-    if let Expr::Op(..) | Expr::Call(..) = ex {
+    if let Expr::BinOp(..) = ex {
         write!(f, "[{}]", ex)
     } else {
         Display::fmt(&ex, f)
@@ -183,6 +183,14 @@ impl Display for Block {
 
 impl Display for ParAssign {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        // LinuxCNC requires function calls to be parenthesized here, although
+        // it doesn't require it for parameter references elsewhere.
+        if let ParId::Indirect(id) = &self.id {
+            if let Expr::Call(..) = **id {
+                write!(f, "#[{}]=", self.id)?;
+                return wrap_op(f, &self.value);
+            }
+        }
         write!(f, "#{}=", self.id)?;
         wrap_op(f, &self.value)
     }
@@ -193,7 +201,7 @@ impl Display for ParId {
         match self {
             ParId::Numeric(n) => write!(f, "{}", n),
             ParId::Named(n) => write!(f, "<{}>", n),
-            ParId::Indirect(ex) => wrap_op_and_fn(f, ex),
+            ParId::Indirect(ex) => wrap_op(f, ex),
         }
     }
 }
@@ -208,9 +216,13 @@ impl Display for Expr {
             } else {
                 write!(f, "{}[{}]", func, args[0])
             },
-            Expr::Op(op, lhs, rhs) => {
+            Expr::BinOp(op, lhs, rhs) => {
                 wrap_op(f, lhs)?;
                 write!(f, " {} ", op)?;
+                wrap_op(f, rhs)
+            }
+            Expr::UnOp(op, rhs) => {
+                write!(f, "{}", op)?;
                 wrap_op(f, rhs)
             }
         }
@@ -239,15 +251,24 @@ impl Display for Op {
     }
 }
 
+impl Display for UnOp {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", match self {
+            UnOp::Plus => "+",
+            UnOp::Minus => "-",
+        })
+    }
+}
+
 impl Display for Word {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Word::Gcode(n)   => { f.write_str("G")?; wrap_op_and_fn(f, n) },
-            Word::Mcode(n)   => { f.write_str("M")?; wrap_op_and_fn(f, n) },
-            Word::Feed(n)    => { f.write_str("F")?; wrap_op_and_fn(f, n) },
-            Word::Spindle(n) => { f.write_str("S")?; wrap_op_and_fn(f, n) },
-            Word::Tool(n)    => { f.write_str("T")?; wrap_op_and_fn(f, n) },
-            Word::Arg(a, n)  => { write!(f, "{}", a)?; wrap_op_and_fn(f, n) },
+            Word::Gcode(n)   => { f.write_str("G")?; wrap_op(f, n) },
+            Word::Mcode(n)   => { f.write_str("M")?; wrap_op(f, n) },
+            Word::Feed(n)    => { f.write_str("F")?; wrap_op(f, n) },
+            Word::Spindle(n) => { f.write_str("S")?; wrap_op(f, n) },
+            Word::Tool(n)    => { f.write_str("T")?; wrap_op(f, n) },
+            Word::Arg(a, n)  => { write!(f, "{}", a)?; wrap_op(f, n) },
         }
     }
 }

@@ -11,6 +11,7 @@ use itertools::Itertools;
 use pest::{Parser, Span, error::{Error, ErrorVariant}, iterators::{Pair, Pairs}};
 
 use crate::ast::*;
+use crate::util::num_to_int;
 
 // Since pest makes Rule "pub", we do this in order to not show it to crate users.
 mod parser {
@@ -25,8 +26,8 @@ use self::parser::{GcodeParser, Rule};
 
 pub type ParseResult<T> = Result<T, Error<Rule>>;
 
-fn err<T>(span: Span, msg: impl Into<String>) -> ParseResult<T> {
-    Err(Error::new_from_span(ErrorVariant::CustomError { message: msg.into() }, span))
+fn err(span: Span, msg: impl Into<String>) -> Error<Rule> {
+    Error::new_from_span(ErrorVariant::CustomError { message: msg.into() }, span)
 }
 
 fn parse_filtered<T: FromStr>(pair: Pair<Rule>) -> T
@@ -40,33 +41,53 @@ fn parse_filtered<T: FromStr>(pair: Pair<Rule>) -> T
 
 fn make_par_ref(pair: Pair<Rule>) -> ParseResult<ParId> {
     let (pair,) = pair.into_inner().collect_tuple().expect("one child");
-    Ok(match pair.as_rule() {
-        Rule::par_num => ParId::Numeric(parse_filtered(pair)),
-        Rule::par_name => ParId::Named(parse_filtered(pair)),
-        Rule::par_ref => ParId::Indirect(Box::new(Expr::Par(make_par_ref(pair)?))),
-        Rule::expr => ParId::Indirect(Box::new(make_expr(pair)?)),
-        _ => unreachable!()
-    })
+    if pair.as_rule() == Rule::par_name {
+        Ok(ParId::Named(parse_filtered(pair)))
+    } else {
+        let expr_span = pair.as_span();
+        let expr = make_expr(pair)?;
+        if let Expr::Num(f) = expr {
+            let n = num_to_int(f, 0, 65535., |f| err(expr_span,
+                                                     format!("Invalid parameter number {}", f)))?;
+            // TODO: check for integral-ness here!
+            Ok(ParId::Numeric(n as u16))
+        } else {
+            Ok(ParId::Indirect(Box::new(expr)))
+        }
+    }
+}
+
+fn make_signed(sign: f64, expr: Expr) -> Expr {
+    if sign < 0. {
+        Expr::UnOp(UnOp::Minus, Box::new(expr))
+    } else {
+        expr
+    }
 }
 
 fn make_expr(expr_pair: Pair<Rule>) -> ParseResult<Expr> {
     let mut lhs = None;
     let mut op = None;
+    let mut sign = 1.;
     for pair in expr_pair.into_inner() {
         match pair.as_rule() {
+            // prefix unary op
+            Rule::op_un => if pair.as_str() == "-" { sign = -sign; },
             // singleton inside "expr_atom" or "value"
-            Rule::expr => return make_expr(pair),
-            Rule::num => return Ok(Expr::Num(parse_filtered(pair))),
+            Rule::expr => return Ok(make_signed(sign, make_expr(pair)?)),
+            Rule::num => return Ok(Expr::Num(sign * parse_filtered::<f64>(pair))),
             Rule::expr_call => {
                 let (func, arg) = pair.into_inner().collect_tuple().expect("children");
-                return Ok(Expr::Call(parse_filtered(func), vec![make_expr(arg)?]));
+                return Ok(make_signed(
+                    sign, Expr::Call(parse_filtered(func), vec![make_expr(arg)?])));
             }
             Rule::expr_atan => {
                 let (argy, argx) = pair.into_inner().collect_tuple().expect("children");
-                return Ok(Expr::Call("ATAN".into(), vec![make_expr(argy)?,
-                                                         make_expr(argx)?]));
+                return Ok(make_signed(
+                    sign, Expr::Call("ATAN".into(), vec![make_expr(argy)?,
+                                                         make_expr(argx)?])));
             }
-            Rule::par_ref => return Ok(Expr::Par(make_par_ref(pair)?)),
+            Rule::par_ref => return Ok(make_signed(sign, Expr::Par(make_par_ref(pair)?))),
             // rules inside (left-associative) binops
             Rule::expr_atom |
             Rule::expr_pow |
@@ -75,9 +96,24 @@ fn make_expr(expr_pair: Pair<Rule>) -> ParseResult<Expr> {
             Rule::expr_cmp => {
                 if let Some(op) = op.take() {
                     let lhs_expr = lhs.take().expect("LHS expected before op");
-                    lhs = Some(Expr::Op(op, Box::new(lhs_expr), Box::new(make_expr(pair)?)));
+                    lhs = Some(Expr::BinOp(op, Box::new(lhs_expr), Box::new(make_expr(pair)?)));
                 } else {
                     lhs = Some(make_expr(pair)?);
+                }
+            }
+            Rule::expr_unop => {
+                let mut inner = pair.into_inner().collect::<Vec<_>>();
+                let expr = make_expr(inner.pop().expect("children"))?;
+                let full = if inner.is_empty() || inner[0].as_str() == "+" {
+                    expr
+                } else {
+                    Expr::UnOp(UnOp::Minus, Box::new(expr))
+                };
+                if let Some(op) = op.take() {
+                    let lhs_expr = lhs.take().expect("LHS expected before op");
+                    lhs = Some(Expr::BinOp(op, Box::new(lhs_expr), Box::new(full)));
+                } else {
+                    lhs = Some(full);
                 }
             }
             // operators inside binops
@@ -111,7 +147,7 @@ fn make_word(pairs: Pairs<Rule>) -> ParseResult<Option<Word>> {
     let (letter, value) = pairs.collect_tuple().expect("children");
     let value = make_expr(value)?;
     match letter.as_str() {
-        "o" | "O" => err(letter.as_span(), "O-word control flow is not supported"),
+        "o" | "O" => Err(err(letter.as_span(), "O-word control flow is not supported")),
         "n" | "N" => Ok(None),  // line numbers are accepted but ignoredxs
         "g" | "G" => Ok(Some(Word::Gcode(value))),
         "m" | "M" => Ok(Some(Word::Mcode(value))),

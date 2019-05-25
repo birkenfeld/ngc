@@ -52,3 +52,6 @@ pub mod parse;
 
 #[cfg(feature = "eval")]
 pub mod eval;
+
+// internal helpers
+pub(crate) mod util;
