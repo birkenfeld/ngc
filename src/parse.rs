@@ -32,27 +32,17 @@ fn err<T>(span: Span, msg: impl Into<String>) -> ParseResult<T> {
 fn parse_filtered<T: FromStr>(pair: Pair<Rule>) -> T
     where T::Err: std::fmt::Debug
 {
-    let input = pair.as_str();
-    let mut new = String::with_capacity(input.len());
-    let mut in_comment = false;
-    for ch in input.chars() {
-        match ch {
-            ' ' | '\t' => (),
-            ')' if in_comment => in_comment = false,
-            '(' => in_comment = true,
-            _ if in_comment => (),
-            ';' => break,
-            _ => new.push(ch),
-        }
-    }
-    new.parse().expect("valid parse")
+    pair.as_str().chars()
+                 .filter(|&ch| ch != ' ' && ch != '\t')
+                 .collect::<String>()
+                 .parse().expect("valid parse")
 }
 
 fn make_par_ref(pair: Pair<Rule>) -> ParseResult<ParId> {
     let (pair,) = pair.into_inner().collect_tuple().expect("one child");
     Ok(match pair.as_rule() {
         Rule::par_num => ParId::Numeric(parse_filtered(pair)),
-        Rule::name => ParId::Named(parse_filtered(pair)),
+        Rule::par_name => ParId::Named(parse_filtered(pair)),
         Rule::par_ref => ParId::Indirect(Box::new(Expr::Par(make_par_ref(pair)?))),
         Rule::expr => ParId::Indirect(Box::new(make_expr(pair)?)),
         _ => unreachable!()
@@ -91,8 +81,6 @@ fn make_expr(expr_pair: Pair<Rule>) -> ParseResult<Expr> {
                 }
             }
             // operators inside binops
-            // XXX: can there be comments *INSIDE* of op names and between **?
-            // Also check ATAN.
             Rule::op_pow => op = Some(Op::Exp),
             Rule::op_mul => op = Some(match pair.as_str() {
                 "*" => Op::Mul, "/" => Op::Div, _ => Op::Mod,
@@ -153,10 +141,8 @@ fn make_word(pairs: Pairs<Rule>) -> ParseResult<Option<Word>> {
     }
 }
 
-fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
-    let mut block = Block::default();
-    // TODO: how to get the real lineno?
-    block.lineno = n;
+fn make_block(lineno: usize, pairs: Pairs<Rule>) -> ParseResult<Option<Block>> {
+    let mut block = Block { lineno, ..Block::default() };
     for pair in pairs {
         match pair.as_rule() {
             Rule::word => if let Some(word) = make_word(pair.into_inner())? {
@@ -173,7 +159,7 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
             _ => unreachable!()
         }
     }
-    Ok(block)
+    Ok(if block.words.len() + block.assignments.len() > 0 { Some(block) } else { None })
 }
 
 /// Parse a program, coming from *filename*, consisting of the source *text*.
@@ -184,9 +170,9 @@ fn make_block(n: usize, pairs: Pairs<Rule>) -> ParseResult<Block> {
 pub fn parse(filename: &str, input: &str) -> ParseResult<Program> {
     let lines = GcodeParser::parse(Rule::file, input).map_err(|e| e.with_path(filename))?;
     let mut prog = Program { filename: filename.into(), blocks: vec![] };
-    for (n, line) in lines.enumerate() {
-        if line.as_rule() == Rule::line {
-            prog.blocks.push(make_block(n, line.into_inner())?);
+    for (lineno, line) in lines.into_iter().enumerate() {
+        if let Some(block) = make_block(lineno + 1, line.into_inner())? {
+            prog.blocks.push(block);
         }
     }
     Ok(prog)

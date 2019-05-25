@@ -5,25 +5,26 @@
 // according to those terms.
 
 WHITESPACE = _{ " " | "\t" }
-COMMENT    = _{ "(" ~ (!")" ~ ANY)* ~ ")" | ";" ~ (!NEWLINE ~ ANY)* }
+COMMENT    = _{ ";" ~ (!NEWLINE ~ ANY)* }
 
-file     = _{ (line? ~ NEWLINE)* ~ EOI }
-line     =  { blockdel? ~ (word | par_assign)+ }
+file     = _{ (line ~ NEWLINE)* ~ EOI }
+comment  = _{ "(" ~ (!")" ~ !NEWLINE ~ ANY)* ~ ")" }
+line     =  { blockdel? ~ comment? ~ (word | par_assign)* }
 blockdel =  { "/" }
 
 // argument word syntax
 
-word   =  { letter ~ value }
+word   =  { letter ~ value ~ comment? }
 letter =  { ASCII_ALPHA }
 value  =  { num | par_ref | expr_brack }
 num    =  { ("+" | "-")? ~ (ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? | "." ~ ASCII_DIGIT+) }
-name   =  { (ASCII_ALPHA | "_")+ }
 
 // parameter syntax
 
-par_assign =  { par_ref ~ "=" ~ value }
-par_ref    =  { "#" ~ (par_num | "<" ~ name ~ ">" | par_ref | expr_brack) }
+par_assign =  { par_ref ~ "=" ~ value ~ comment? }
+par_ref    =  { "#" ~ (par_num | "<" ~ par_name ~ ">" | par_ref | expr_brack) }
 par_num    =  { ASCII_DIGIT+ }
+par_name   =  { (!">" ~ ANY)+ }
 
 // expression syntax
 
@@ -35,7 +36,9 @@ expr_mul   =  { expr_pow ~ (op_mul ~ expr_pow)* }
 expr_pow   =  { expr_atom ~ (op_pow ~ expr_atom)* }
 expr_atom  =  { expr_atan | expr_call | num | par_ref | expr_brack }
 expr_atan  =  { ^"ATAN" ~ expr_brack ~ "/" ~ expr_brack }
-expr_call  =  { name ~ expr_brack }
+expr_call  =  { expr_fn ~ expr_brack }
+expr_fn    =  { ^"ABS" | ^"ACOS" | ^"ASIN" | ^"COS" | ^"EXP" | ^"FIX" |
+                ^"FUP" | ^"ROUND" | ^"LN" | ^"SIN" | ^"SQRT" | ^"TAN" }
 
 // operators
 

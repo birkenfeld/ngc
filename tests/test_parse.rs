@@ -11,11 +11,12 @@ fn test_parse() {
     let src = r#"; Try to exercise as much of the syntax as possible.
 
 ; comments anywhere, line numbers, and block deletion
-/G1 X(a)10(a) Y2(a);rest
-(a)N1 G#(a)1 X10
+/G1 X1 0(a) Y2(a);rest
+/(a)
+(a)N1 G#1 X10 (a)
 
 ; number formats
-#1=+1. #2=1.5 #3=-.5
+#1=+1. (a) #2=1.5 #3=-.5
 
 ; expressions
 G[[1+2]/3*4-5]
@@ -26,7 +27,7 @@ G[1 LE 2]
 ; parameter references
 #1=[1+2]
 #<de pth>=1
-#<de(a)pth>=2
+#<de(a) pth>=2
 #[1]=3
 
 "#;
@@ -40,12 +41,14 @@ G[ATAN[1]/[2]]
 G[1 LE 2]
 #1=[1 + 2]
 #<depth>=1
-#<depth>=2
+#<de(a)pth>=2
 #1=3
 "#;
 
     let prog = parse::parse("testfile", src).unwrap();
-    println!("{:?}", prog);
+
+    // make sure we count lines correctly
+    assert_eq!(prog.blocks[0].lineno, 4);
 
     assert_eq!(prog.to_string(), parsed.replace("\n", " \n"));
 }
@@ -53,10 +56,16 @@ G[1 LE 2]
 #[test]
 fn test_invalid() {
     for snippet in &[
-        "$",   // invalid characters
-        "GG",  // missing values
-        "O10", // O-words are unsupported
-        "(",   // unclosed comments
+        "$",            // invalid characters
+        "GG",           // missing values
+        "O10",          // O-words are unsupported
+        "(",            // unclosed comments
+        "(\n)",         // comments spanning lines
+        "G(a)1",        // comments between letter/value
+        "G1(a)2",       // comments within the value
+        "G[1(a)+2]",    // comments within an expression
+        "G[1;]",        // line comments within expression
+        "G[TEST[x]]",   // invalid function
     ] {
         assert!(parse::parse("testfile", snippet).is_err());
     }
