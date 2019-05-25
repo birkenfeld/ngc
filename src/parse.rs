@@ -47,9 +47,8 @@ fn make_par_ref(pair: Pair<Rule>) -> ParseResult<ParId> {
         let expr_span = pair.as_span();
         let expr = make_expr(pair)?;
         if let Expr::Num(f) = expr {
-            let n = num_to_int(f, 0, 65535., |f| err(expr_span,
-                                                     format!("Invalid parameter number {}", f)))?;
-            // TODO: check for integral-ness here!
+            let n = num_to_int(f, 0, 65535.,
+                               |f| err(expr_span, format!("Invalid parameter number {}", f)))?;
             Ok(ParId::Numeric(n as u16))
         } else {
             Ok(ParId::Indirect(Box::new(expr)))
@@ -78,14 +77,28 @@ fn make_expr(expr_pair: Pair<Rule>) -> ParseResult<Expr> {
             Rule::num => return Ok(Expr::Num(sign * parse_filtered::<f64>(pair))),
             Rule::expr_call => {
                 let (func, arg) = pair.into_inner().collect_tuple().expect("children");
-                return Ok(make_signed(
-                    sign, Expr::Call(parse_filtered(func), vec![make_expr(arg)?])));
+                let func = match func.as_str() {
+                    x if x.eq_ignore_ascii_case("EXISTS") => Function::Exists,
+                    x if x.eq_ignore_ascii_case("ABS")    => Function::Abs,
+                    x if x.eq_ignore_ascii_case("ACOS")   => Function::Acos,
+                    x if x.eq_ignore_ascii_case("ASIN")   => Function::Asin,
+                    x if x.eq_ignore_ascii_case("COS")    => Function::Cos,
+                    x if x.eq_ignore_ascii_case("EXP")    => Function::Exp,
+                    x if x.eq_ignore_ascii_case("FIX")    => Function::Fix,
+                    x if x.eq_ignore_ascii_case("FUP")    => Function::Fup,
+                    x if x.eq_ignore_ascii_case("ROUND")  => Function::Round,
+                    x if x.eq_ignore_ascii_case("LN")     => Function::Ln,
+                    x if x.eq_ignore_ascii_case("SIN")    => Function::Sin,
+                    x if x.eq_ignore_ascii_case("SQRT")   => Function::Sqrt,
+                    _                                     => Function::Tan,
+                };
+                return Ok(make_signed(sign, Expr::Call(func, Box::new(make_expr(arg)?))));
             }
             Rule::expr_atan => {
                 let (argy, argx) = pair.into_inner().collect_tuple().expect("children");
                 return Ok(make_signed(
-                    sign, Expr::Call("ATAN".into(), vec![make_expr(argy)?,
-                                                         make_expr(argx)?])));
+                    sign, Expr::Call(Function::Atan(Box::new(make_expr(argy)?)),
+                                     Box::new(make_expr(argx)?))));
             }
             Rule::par_ref => return Ok(make_signed(sign, Expr::Par(make_par_ref(pair)?))),
             // rules inside (left-associative) binops

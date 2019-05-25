@@ -19,7 +19,7 @@ fn test_parse() {
 #1=+1. (a) #2=1.5 #3=-.5
 
 ; expressions
-G[[1+2]/3*4--5]
+G[[1+ 2]/ 3*4--5]
 G+SIN[0]
 G[ATAN[1]/[2]]
 G[1 LE 2]
@@ -28,9 +28,9 @@ G[1 LE 2]
 #1=[1+2]
 #<de pth>=1
 #<de(a) pth>=2
-#[1]=3
+#[1 ]=3
 #-#2=[+ 5]
-#SIN[0]=7 ; LCNC doesn't like this.
+#SIN [0]=7 ; LCNC doesn't like this.
 
 "#;
 

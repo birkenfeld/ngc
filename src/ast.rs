@@ -68,9 +68,9 @@ pub enum Expr {
     Num(f64),
     /// A parameter reference.
     Par(ParId),
-    /// A function call, with arguments.  There is a small list of built-in
-    /// functions, most of which take one argument.  `ATAN` takes two arguments.
-    Call(String, Vec<Expr>),
+    /// A function call, with argument.  `ATAN` takes two arguments, and carries
+    /// the first one in the enum variant.
+    Call(Function, Box<Expr>),
     /// An operator, with lefthand and righthand expression.
     BinOp(Op, Box<Expr>, Box<Expr>),
     /// An unary operator.
@@ -119,6 +119,27 @@ pub enum Op {
 pub enum UnOp {
     Plus,
     Minus,
+}
+
+/// The functions known to G-code.
+///
+/// ATAN, having two arguments, carries the first one here.
+#[derive(Debug)]
+pub enum Function {
+    Atan(Box<Expr>),
+    Exists,
+    Abs,
+    Acos,
+    Asin,
+    Cos,
+    Exp,
+    Fix,
+    Fup,
+    Round,
+    Ln,
+    Sin,
+    Sqrt,
+    Tan,
 }
 
 /// The possible argument words (i.e. all words except N, G, M, F, S, T).
@@ -211,11 +232,7 @@ impl Display for Expr {
         match self {
             Expr::Num(n) => write!(f, "{}", n),
             Expr::Par(id) => write!(f, "#{}", id),
-            Expr::Call(func, args) => if args.len() == 2 {
-                write!(f, "{}[{}]/[{}]", func, args[0], args[1])
-            } else {
-                write!(f, "{}[{}]", func, args[0])
-            },
+            Expr::Call(func, arg) => write!(f, "{}[{}]", func, arg),
             Expr::BinOp(op, lhs, rhs) => {
                 wrap_op(f, lhs)?;
                 write!(f, " {} ", op)?;
@@ -296,5 +313,26 @@ impl Display for Arg {
             Arg::ParamQ => "Q",
             Arg::ParamR => "R",
         })
+    }
+}
+
+impl Display for Function {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Function::Atan(ex) => write!(f, "ATAN[{}]/", ex),
+            Function::Exists   => f.write_str("EXISTS"),
+            Function::Abs      => f.write_str("ABS"),
+            Function::Acos     => f.write_str("ACOS"),
+            Function::Asin     => f.write_str("ASIN"),
+            Function::Cos      => f.write_str("COS"),
+            Function::Exp      => f.write_str("EXP"),
+            Function::Fix      => f.write_str("FIX"),
+            Function::Fup      => f.write_str("FUP"),
+            Function::Round    => f.write_str("ROUND"),
+            Function::Ln       => f.write_str("LN"),
+            Function::Sin      => f.write_str("SIN"),
+            Function::Sqrt     => f.write_str("SQRT"),
+            Function::Tan      => f.write_str("TAN"),
+        }
     }
 }
