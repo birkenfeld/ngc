@@ -20,6 +20,7 @@ const MAX_TOOL: u16 = 100;
 const MAX_PARAM: u16 = 10000;
 
 /// A machine instruction collected from G-code.
+#[derive(Debug)]
 pub struct Instruction {
     pub gcode_line: usize,
     pub instr: Instr,
@@ -104,7 +105,7 @@ struct State {
     feed_rate: f64,
     spindle_speed: f64,
     dist_rel: bool,
-    offset_rel: bool,
+    offset_abs: bool,
     plane: Plane,
     cutter_comp: CutterComp,
     length_comp: LengthComp,
@@ -410,8 +411,8 @@ impl Evaluator {
             _ => ()
         }
         match gcodes.modal_group("arc offset distance mode", &[901, 911])? {
-            Some(901) => self.state.offset_rel = false,
-            Some(911) => self.state.offset_rel = true,
+            Some(901) => self.state.offset_abs = true,
+            Some(911) => self.state.offset_abs = false,
             _ => ()
         }
 
@@ -462,13 +463,16 @@ impl Evaluator {
                         if !offsets.is_empty() {
                             return Err(ErrType::MixedCenterRadiusArc);
                         }
+                        if value == 0. {
+                            return Err(ErrType::InvalidWordValue(GenWord::R, 0.));
+                        }
                         HelixCenter::Radius(value)
                     } else {
                         if offsets.is_empty() {
                             return Err(ErrType::ArcCenterRequired);
                         }
                         HelixCenter::Center(
-                            Coords::from_ijk(offsets, self.state.offset_rel))
+                            Coords::from_ijk(offsets, !self.state.offset_abs))
                     };
 
                     exec!(Helix(x == 20, Coords::new(axes, self.state.dist_rel),
