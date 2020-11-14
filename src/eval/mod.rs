@@ -173,7 +173,7 @@ impl Evaluator {
         let mut spindle = None;
         let mut tool = None;
         let mut gcodes = Codes(BitSet::with_capacity(1000), ErrType::ConflictingGCodes);
-        let mut mcodes = Codes(BitSet::with_capacity(100), ErrType::ConflictingMCodes);
+        let mut mcodes = Codes(BitSet::with_capacity(200), ErrType::ConflictingMCodes);
         let mut gens = GenWords(HashMap::new());
         let mut axes = HashMap::new();
         let mut offsets = HashMap::new();
