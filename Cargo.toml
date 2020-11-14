@@ -20,10 +20,10 @@ required-features = ["eval"]
 [dependencies]
 pest = "2.1"
 pest_derive = "2.1"
-itertools = "0.8"
-fixedbitset = "0.1"
-strum = "0.15"
-strum_macros = "0.15"
+itertools = "0.9"
+fixedbitset = "0.3"
+strum = "0.19"
+strum_macros = "0.19"
 
 [features]
 default = []
