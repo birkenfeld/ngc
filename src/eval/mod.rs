@@ -190,7 +190,7 @@ impl Evaluator {
                     gcodes.insert(n);
                 }
                 Word::Mcode(ex) => {
-                    let n = num_to_int(self.eval_expr(ex)?, 100, ErrType::InvalidMCode)?;
+                    let n = num_to_int(self.eval_expr(ex)?, 199, ErrType::InvalidMCode)?;
                     mcodes.insert(n);
                 }
                 Word::Arg(a, ex) => {
