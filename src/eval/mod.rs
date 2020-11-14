@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Georg Brandl.  Licensed under the Apache License,
+// Copyright (c) 2019-2020 Georg Brandl.  Licensed under the Apache License,
 // Version 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>
 // or the MIT license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at
 // your option. This file may not be copied, modified, or distributed except
@@ -63,6 +63,7 @@ pub enum Instr {
     Spindle(Spindle),           // M3-5
     ToolChange,                 // M6
     Coolant(Coolant),           // M7-9
+    UserDefined(u16, Option<f64>, Option<f64>), // M100-199  with P/Q words
 
     // Others
     FeedRate(f64),              // F
@@ -289,6 +290,11 @@ impl Evaluator {
         // #7. Overrides (M48-M53), currently unsupported.
         if let Some(x) = mcodes.modal_group("overrides", &[48, 49, 50, 51, 52, 53])? {
             return Err(ErrType::UnsupportedMCode(x as u16));
+        }
+
+        // #7.5. User defined codes.
+        if let Some(x) = mcodes.modal_group("user-defined", USER_DEFINED)? {
+            exec!(UserDefined(x as u16, gens.get(GenWord::P), gens.get(GenWord::Q)));
         }
 
         // #8. Dwell (G4).
@@ -665,3 +671,11 @@ impl GenWords {
         self.get_int(p, max).map(|v| v.unwrap_or(def))
     }
 }
+
+const USER_DEFINED: &[usize] = &[
+    100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117,
+    118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+    136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153,
+    154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171,
+    172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189,
+    190, 191, 192, 193, 194, 195, 196, 197, 198, 199];
