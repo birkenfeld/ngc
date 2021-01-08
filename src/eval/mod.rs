@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020 Georg Brandl.  Licensed under the Apache License,
+// Copyright (c) 2019-2021 Georg Brandl.  Licensed under the Apache License,
 // Version 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>
 // or the MIT license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at
 // your option. This file may not be copied, modified, or distributed except
@@ -48,8 +48,6 @@ pub enum Instr {
     Probe(Coords, u32),         // G38
     CutterComp(CutterComp),     // G40-42
     LengthComp(LengthComp),     // G43, G49
-    // ? MachineCoords G53
-    // ? CoordSystem G54-G59
     PathControl(PathMode),      // G61, G64
     // Cycles G73, G76, G80-89, G98-99
     // ? Distance mode G90,G91
@@ -86,7 +84,7 @@ pub struct Evaluator {
     // private state tracking
     motion_mode: u16,
     state: State, // state manipulated by M70-73
-    saved_state: Option<State>,
+    // saved_state: Option<State>,
 }
 
 /*
@@ -115,6 +113,7 @@ struct State {
     coolant: Coolant,
     lathe_diam: bool,
     inches: bool,
+    coords: u16,
 }
 
 impl Evaluator {
@@ -125,7 +124,7 @@ impl Evaluator {
             vars: vars.unwrap_or_default(),
             motion_mode: 1,
             state: Default::default(),
-            saved_state: None,
+            // saved_state: None,
         }
     }
 
@@ -395,8 +394,19 @@ impl Evaluator {
 
         // #13. Select coordinate system (G54-G59). Only first one supported.
         match gcodes.modal_group("coordinate system", &[540, 550, 560, 570, 580, 590, 591, 592, 593])? {
-            Some(540) | None => (),
-            Some(x) => return Err(ErrType::UnsupportedGCode(x))
+            None => (),
+            // Since we don't support setting any offsets for the
+            // coordinate systems, nothing else is required here.
+            Some(540) => { self.state.coords = 0; }
+            Some(550) => { self.state.coords = 1; }
+            Some(560) => { self.state.coords = 2; }
+            Some(570) => { self.state.coords = 3; }
+            Some(580) => { self.state.coords = 4; }
+            Some(590) => { self.state.coords = 5; }
+            Some(591) => { self.state.coords = 6; }
+            Some(592) => { self.state.coords = 7; }
+            Some(593) => { self.state.coords = 8; }
+            _ => unreachable!()
         }
 
         // #14. Set path control mode.
@@ -434,10 +444,9 @@ impl Evaluator {
         }
 
         // #18. Perform motion.
-        let machine_coords = gcodes.modal_group("machine coords", &[530])?.is_some();
-        if machine_coords {
-            return Err(ErrType::UnsupportedGCode(530));
-        }
+        let _machine_coords = gcodes.modal_group("machine coords", &[530])?.is_some();
+        // Since we don't support multiple coordinate systems or offsets between
+        // them, G53 can be treated as a no-op.
 
         // Motion is also performed if there are any axis (or offset) words.
         if motion_mode.is_none() && has_axis_words {
