@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Georg Brandl.  Licensed under the Apache License,
+// Copyright (c) 2019-2021 Georg Brandl.  Licensed under the Apache License,
 // Version 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>
 // or the MIT license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at
 // your option. This file may not be copied, modified, or distributed except
@@ -197,7 +197,14 @@ fn make_word(pairs: Pairs<Rule>) -> ParseResult<Option<Word>> {
     }
 }
 
-fn make_block(lineno: usize, pairs: Pairs<Rule>) -> ParseResult<Option<Block>> {
+enum PercentState {
+    NotOnFirstLine,
+    OnFirstLine,
+    SeenTwice,
+}
+
+fn make_block(lineno: usize, pairs: Pairs<Rule>, pct: &mut PercentState)
+              -> ParseResult<Option<Block>> {
     let mut block = Block { lineno, ..Block::default() };
     for pair in pairs {
         match pair.as_rule() {
@@ -212,6 +219,15 @@ fn make_block(lineno: usize, pairs: Pairs<Rule>) -> ParseResult<Option<Block>> {
                 });
             }
             Rule::blockdel => block.blockdel = true,
+            Rule::percent => {
+                if lineno == 1 {
+                    *pct = PercentState::OnFirstLine;
+                } else if let PercentState::OnFirstLine = pct  {
+                    *pct = PercentState::SeenTwice;
+                } else {
+                    return Err(err(pair.as_span(), "percent sign missing on first line"));
+                }
+            }
             _ => unreachable!()
         }
     }
@@ -226,10 +242,25 @@ fn make_block(lineno: usize, pairs: Pairs<Rule>) -> ParseResult<Option<Block>> {
 pub fn parse(filename: &str, input: &str) -> ParseResult<Program> {
     let lines = GcodeParser::parse(Rule::file, input).map_err(|e| e.with_path(filename))?;
     let mut prog = Program { filename: filename.into(), blocks: vec![] };
+    let mut pct = PercentState::NotOnFirstLine;
+    let mut span = None;
     for (lineno, line) in lines.into_iter().enumerate() {
-        if let Some(block) = make_block(lineno + 1, line.into_inner())? {
+        span = Some(line.as_span());
+        if let Some(block) = make_block(lineno + 1, line.into_inner(), &mut pct)? {
             prog.blocks.push(block);
         }
+        // After the second percent sign, stop program
+        if let PercentState::SeenTwice = pct {
+            // if percent signs are used, M2 is optional
+            prog.blocks.push(Block { lineno: lineno + 1,
+                                     blockdel: false,
+                                     words: vec![Word::Mcode(Expr::Num(2.0))],
+                                     assignments: vec![] });
+            break;
+        }
+    }
+    if let PercentState::OnFirstLine = pct {
+        return Err(err(span.unwrap(), "percent sign missing on last line"));
     }
     Ok(prog)
 }
