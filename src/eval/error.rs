@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Georg Brandl.  Licensed under the Apache License,
+// Copyright (c) 2019-2021 Georg Brandl.  Licensed under the Apache License,
 // Version 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>
 // or the MIT license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at
 // your option. This file may not be copied, modified, or distributed except
@@ -48,7 +48,7 @@ impl fmt::Display for EvalError {
             ErrType::DivByZero =>
                 write!(f, "Division by zero attempted"),
             ErrType::InvalidGCode(c) =>
-                write!(f, "The code G{} does not exist", c),
+                write!(f, "The code G{} does not exist", *c as f64 / 10.),
             ErrType::InvalidMCode(c) =>
                 write!(f, "The code M{} does not exist", c),
             ErrType::InvalidTool(n) =>
