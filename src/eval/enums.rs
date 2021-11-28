@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Georg Brandl.  Licensed under the Apache License,
+// Copyright (c) 2019-2021 Georg Brandl.  Licensed under the Apache License,
 // Version 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>
 // or the MIT license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at
 // your option. This file may not be copied, modified, or distributed except
@@ -127,7 +127,7 @@ impl Coords {
 
     pub(crate) fn from_ijk(map: HashMap<Offset, f64>, rel: bool) -> Self {
         Self {
-            rel: rel,
+            rel,
             map: map.into_iter().map(|(k, v)| (match k {
                 Offset::I => Axis::X,
                 Offset::J => Axis::Y,
