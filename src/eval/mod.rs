@@ -49,7 +49,15 @@ pub enum Instr {
     CutterComp(CutterComp),     // G40-42
     LengthComp(LengthComp),     // G43, G49
     PathControl(PathMode),      // G61, G64
-    // Cycles G73, G76, G80-89, G98-99
+    CancelCanned,               // G80
+    CannedCycle(u16,            // the G code
+                Coords,         // the coordinates
+                u16,            // the repetitions (L word)
+                f64,            // the dwell time (P word)
+                Option<f64>,    // the Q word
+                Option<f64>,    // the R word
+    ),                          // G81-89
+    // Cycles G73, G76, G98-99
     // ? Distance mode G90,G91
     // ? Offsets G92
     // FeedRateMode(u16), // G93-95
@@ -160,7 +168,7 @@ impl Evaluator {
     {
         macro_rules! exec {
             ($($tt:tt)*) => {
-                exec(self, Instruction { gcode_line: block.lineno, instr: Instr::$($tt)*})?;
+                exec(self, Instruction { gcode_line: block.lineno, instr: Instr::$($tt)*})?
             }
         }
 
@@ -492,6 +500,15 @@ impl Evaluator {
 
                     exec!(Helix(x == 20, Coords::new(axes, self.state.dist_rel),
                                 center, gens.get_int_def(GenWord::P, 1, 1000)?));
+                }
+                800 => exec!(CancelCanned),
+                810 | 820 | 830 | 840 | 850 | 860 | 870 | 880 | 890 => {
+                    exec!(CannedCycle(x / 10,
+                                      Coords::new(axes, self.state.dist_rel),
+                                      gens.get_int_def(GenWord::L, 1, 1000)?,
+                                      gens.get_def(GenWord::P, 0.),
+                                      gens.get(GenWord::Q),
+                                      gens.get(GenWord::R)));
                 }
                 _ => return Err(ErrType::UnsupportedGCode(x))
             }
