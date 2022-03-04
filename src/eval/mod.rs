@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2021 Georg Brandl.  Licensed under the Apache License,
+// Copyright (c) 2019-2022 Georg Brandl.  Licensed under the Apache License,
 // Version 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>
 // or the MIT license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at
 // your option. This file may not be copied, modified, or distributed except
@@ -337,7 +337,7 @@ impl Evaluator {
 
         // #10.1. Set lathe mode (G7-G8).
         match gcodes.modal_group("lathe mode", &[70, 80])? {
-            Some(70) => return Err(ErrType::UnsupportedGCode(70)),
+            Some(70) => self.state.lathe_diam = true,
             Some(80) => self.state.lathe_diam = false,
             _ => ()
         }
